@@ -1,7 +1,10 @@
-# A lot of smaller helper functions used for manipulating Axis Neuron files.
+# ================================================================================================ # 
+# Helper functions and modules that are imported into every other module in this package. These
+# should not depend on other modules.
 # 
-# Edward Lee edl56@cornell.edu
+# Author: Eddie Lee, edl56@cornell.edu
 # 2017-03-28
+# ================================================================================================ # 
 
 from __future__ import division
 try:
@@ -11,18 +14,22 @@ except ImportError:
 from matplotlib import gridspec
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
-from numpy import sin,cos
+from numpy import sin,cos,pi
 import pandas as pd
 from scipy.interpolate import LSQUnivariateSpline,UnivariateSpline,interp1d
-import entropy.entropy as info
+import entropy as info
 from scipy.signal import fftconvolve
 from misc.utils import unique_rows
-import load
 from numba import jit
 import multiprocess as mp
 from scipy.optimize import minimize
 from scipy.signal import spectrogram,savgol_filter,fftconvolve
 from misc.angle import *
+import pywt
+import os
+
+# Declare global variables for entire package.
+DATADR = os.path.expanduser('~')+'/Dropbox/Sync_trials/Data'
 
 
 # ================== # 
@@ -33,13 +40,20 @@ class MultiUnivariateSpline(object):
         """
         Simple extension of UnivariateSpline to handle multidimensional data.
         
-        Params:
-        -------
+        Parameters
+        ----------
         t (ndarray)
         x (ndarray)
             If 2d, then (n_samples,n_dim).
+        knot_spacing : float,1/30
+        fit_type : str,'LSQ'
+
         **kwargs
         """
+        if type(t) is list:
+            t = np.array(t)
+        if type(x) is list:
+            x = np.array(x)
         assert x.ndim==2
         self.splines = []
         self.knot_spacing = knot_spacing
@@ -74,9 +88,292 @@ class MultiUnivariateSpline(object):
         return f
 
 
+
 # ===================== #
 # Function definitions. #
 # ===================== #
+def rotate_xy(xy,theta):
+    """
+    Apply rotation to xy-vector.
+
+    Parameters
+    ----------
+    xy : ndarray
+        (n_samples,2)
+    theta : float
+        Angle to rotate by in the CCW direction.
+
+    Returns
+    -------
+
+    """
+    return np.array([[np.cos(theta),-np.sin(theta)],
+                    [np.sin(theta),np.cos(theta)]]).dot(xy.T).T
+
+
+
+def window_mutual_info(vel,vis,dt0,dt1,vel1=None,select_vis_start=True):
+    """
+    Mutual information between visible and invisible portions of window. Right now, this only looks
+    for information in the sign of the average.
+    
+    Parameters
+    ----------
+    vel : ndarray
+        Avatar velocity.
+    vis : ndarray
+    dt0 : float
+        Time to look back behind visibility turns on. 
+    dt1 : float
+        Time to look back after visibility turns on. 
+    vel1 : ndarray,None
+    select_vis_start : bool,True
+    
+    Returns
+    -------
+    mi 
+    """
+    from entropy import MI,joint_p_mat
+
+    dt0,dt1 = int(dt0*60),int(dt1*60)
+    if select_vis_start:
+        visStartIx = np.where(np.diff(vis)==1)[0]
+    else:
+        visStartIx = np.where(np.diff(vis)==-1)[0]
+    dt0ix = visStartIx-dt0
+    dt1ix = visStartIx+dt1
+    
+    assert ( (dt0ix<visStartIx) & (visStartIx<dt1ix) ).all()
+    
+    # Keep indices within bounds of array.
+    keepix = (dt0ix>=0) & (dt1ix<len(vel))
+    dt0ix,dt1ix = dt0ix[keepix],dt1ix[keepix]
+    visStartIx = visStartIx[keepix]
+    
+    v = np.zeros((len(dt0ix),2))
+    if vel1 is None:
+        vel1 = vel
+    for i,(t0,t1,t2) in enumerate(zip(dt0ix,visStartIx,dt1ix)):
+        v[i] = np.sign(vel[t0:t1].mean()),np.sign(vel1[t1:t2].mean())
+    
+    return MI( joint_p_mat(v,[0],[1]) )
+
+def mean_window_v(avv,vis,dt0,dt1):
+    """
+    Return velocity trajectory averaged across windows for a single trial.
+    
+    Parameters
+    ----------
+    avv : ndarray
+        Avatar velocity.
+    vis : ndarray
+    dt0 : float
+        Time to look back behind visibility turns on. 
+    dt1 : float
+        Time to look back after visibility turns on. 
+    
+    Returns
+    -------
+    vMean : ndarray
+    vStd : ndarray
+    """
+    dt0,dt1 = int(dt0*60),int(dt1*60)
+    visStartIx = np.where(np.diff(vis)==1)[0]
+    dt0ix = visStartIx-dt0
+    dt1ix = visStartIx+dt1
+    
+    # Keep indices within bounds of array.
+    keepix = (dt0ix>=0) & (dt1ix<len(avv))
+    dt0ix,dt1ix = dt0ix[keepix],dt1ix[keepix]
+
+    v = np.zeros((len(dt0ix),(dt1ix-dt0ix).min()))
+    for i,(t0,t1) in enumerate(zip(dt0ix,dt1ix)):
+        v[i] = avv[t0:t0+v.shape[1]]
+    
+    return v.mean(0),v.std(0)
+
+def corrcoef_before_vis(subv,avv,vis,dt):
+    """
+    Coherence using the wavelet transform for dt seconds around the visibility turning back on.
+    
+    Parameters
+    ----------
+    subv : ndarray
+        Subject velocity.
+    avv : ndarray
+        Avatar velocity.
+    vis : ndarray
+    dt : float
+        Time to look back behind or after visibility turns on. Positive values correspond to looking
+        after the window.
+
+    Returns
+    -------
+    """
+    # Get indices of points near the end of the invisibility window.
+    dtprev = int(dt*60)
+    visStartIx = np.where(np.diff(vis)==1)[0]+dtprev
+    # Apply bounds.
+    visStartIx = visStartIx[(visStartIx>=0)&(visStartIx<len(vis))]
+    
+    return np.corrcoef(subv[visStartIx],avv[visStartIx])[0,1]
+
+def min_phase_time_shift(freq,subjectAngle,templateAngle,
+                         bds=1,
+                         dtgrid=np.linspace(0,1,100),
+                         fweights=None,
+                         ax=None,
+                         disp=False):
+    """
+    Find the global time shift that maximizes the phase density within the threshold.
+    
+    Parameters
+    ----------
+    freq : ndarray
+    subjectAngle : ndarray
+        Subject complex angle.
+    templateAngle : ndarray
+        Template complex angle.
+    dtgrid : ndarray,np.linspace(0,1,100)
+    fweights : ndarray
+        How much to weight each frequency when calculating the average phase shift. This should be
+        (n_freq,n_time).
+    bds : float or tuple,1
+        Bounds for counting phase difference that is within bounds. This is not properly implemented
+        yet.
+    disp : bool,False
+        
+    Returns
+    -------
+    dtshift : float
+        Optimal time shift.
+    """
+    if fweights is None:
+        fweights = np.ones_like(subjectAngle)
+    zeroDensity = np.zeros_like(dtgrid)
+    zeroDensityNull = np.zeros_like(dtgrid)
+    
+    for i,dt in enumerate(dtgrid):
+        subPhaseAfterShift = shift_phase_by_time(freq,subjectAngle,dt)
+        dphase = mod_angle( templateAngle-subPhaseAfterShift )
+        zeroDensity[i] = ((np.abs(dphase)<bds)*fweights).sum()
+        
+        temPhaseAfterShift = shift_phase_by_time(freq,templateAngle,dt)
+        dphase = mod_angle( templateAngle-temPhaseAfterShift )
+        zeroDensityNull[i] = ((np.abs(dphase)<bds)*fweights).sum()
+    
+    shiftix = np.argmax(zeroDensity)
+#     if (zeroDensity[shiftix]>zeroDensityNull[:shiftix]).all():
+#         print "Null model does not reach minimum before solution."
+    
+    if disp:
+        if ax is None:
+            fig,ax = plt.subplots()
+        ax.plot(dtgrid,zeroDensity,'o')
+        ax.plot(dtgrid,zeroDensityNull,'ro')
+        ax.set(xlabel='dt',ylabel='zero density')
+        ax.legend(('Subject','Avatar'),fontsize='small',numpoints=1)
+        
+    return dtgrid[shiftix]
+
+def optimal_time_shift_freq(dphase,dphase_bds=[-pi/10,pi/10],
+                            freqs=np.arange(1,31)*.1,
+                            weights=None,
+                            return_all=False):
+    """
+    Find the optimal uniform time shift by shifting by each frequency one at a time.
+    
+    Parameters
+    ----------
+    dphase : ndarray
+        (n_freq,n_time)
+    dphase_bds : tuple,(-pi/10,pi/10)
+        Integration domain.
+    freqs : ndarray,np.arange(1,31)*.1
+        Frequency of each row of dphase.
+    weights : ndarray,None
+        Weight to assign to each frequency when taking mean over frequencies.
+    return_all : bool,False
+    
+    Returns
+    -------
+    fopt : float
+        Optimal frequency for uniform temporal shift.
+    """
+    from misc.plot import colorcycle
+    avgDensity = np.zeros(len(freqs))
+    #fig,ax = plt.subplots()
+    #cc = colorcycle(len(freqs))
+
+    # Iterate over subtracting temporal delays from different frequencies.
+    for i in xrange(len(freqs)):
+        shifteddphase = subtract_freq_phase(i,freqs,dphase)
+        if weights is None:
+            weights_ = np.ones(len(freqs)-1)/(len(freqs)-1)
+        else:
+            weights_ = np.delete(weights,i)
+
+        #ax.plot( [((s>dphase_bds[0])&(s<dphase_bds[1])).mean()
+        #                         for s in shifteddphase] ,c=cc.next(),lw=2)
+        avgDensity[i] = np.array([((s>dphase_bds[0])&(s<dphase_bds[1])).mean()
+                                 for s in np.delete(shifteddphase,i,axis=0)]).dot(weights_)
+    if return_all:
+        return freqs[np.argmax(avgDensity)],avgDensity
+    return freqs[np.argmax(avgDensity)]
+
+def phase_and_dphase(x,y,wavelet='cgau1',sample_period=1/60,precision=10):
+    """
+    Calculate complex phase per frequency per time and dphase for two signals
+    using a continuous wavelet transform with the complex Gaussian.
+
+    Parameters
+    ----------
+    x : ndarray
+    y : ndarray
+    wavelet : str,'cgau1'
+        cgau1 or complex Gaussian gives fine temporal precision but poor frequency localization
+        whereas the higher derivatives of the complex gaussian like 'cgau8' give low temporal
+        precision and high frequency precision.
+    sample_period : float,1/60
+
+    Returns
+    -------
+    freqs : ndarray
+    phasex : ndarray
+    phasey : ndarray
+    dphase : ndarray
+    """
+    import pywt
+
+    xcwtmat,freqs = pywt.cwt(x,np.arange(1,100),wavelet,sample_period,precision=precision)
+    ycwtmat,freqs = pywt.cwt(y,np.arange(1,100),wavelet,sample_period,precision=precision)
+
+    phasex = np.arctan2( xcwtmat.imag,xcwtmat.real )
+    phasey = np.arctan2( ycwtmat.imag,ycwtmat.real )
+
+    dphase = mod_angle(phasex-phasey)
+
+    return freqs,phasex,phasey,dphase
+
+def select_freqs(freqs,precision=1):
+    """
+    Only return a subset of the frequencies (unique by number of decimal points) and the 
+    indices of the selected frequencies.
+
+    Params
+    ------
+    freqs : ndarray
+    precision : int,1
+
+    Returns
+    -------
+    ufreqs : ndarray
+    freqix : ndarray
+    """
+    freqs = np.around(freqs,precision)
+    ufreqs,freqix = np.unique(freqs,return_index=True)
+    return ufreqs,freqix  # remember frequencies are return in reverse order
+
 def phase_entropy(d,n_bins=20):
     """
     Calculate entropy for each row in d.
@@ -127,7 +424,7 @@ def phase_peakiness(d,bds=.8):
 
 def subtract_freq_phase(subtractIx,f,dphase):
     """
-    Subtract lower frequency phase from higher frequencies.
+    Subtract lower frequency phase from higher frequencies in temporal domain.
 
     Params:
     -------
@@ -141,6 +438,49 @@ def subtract_freq_phase(subtractIx,f,dphase):
     dphase *= f[:,None]*2*np.pi
     dphase = mod_angle(dphase)
     return dphase
+
+def shift_phase_by_time(f,phase,time_shift):
+    """
+    Time shift is subtracted from given phase. A positive time shift pushes things forwards in time
+    and a negative shift pushes things backwards (or later).
+
+    Params:
+    -------
+    f : ndarray
+        Frequencies of each row of phase.
+    phase : ndarray
+        In units of radians.
+    time_shift : float
+
+    Returns
+    -------
+    phase : ndarray
+        Same shape as given phase.
+    """
+    phase = phase.copy()
+    phase -= f[:,None]*2*pi*time_shift
+    phase = mod_angle(phase)
+    return phase
+
+def find_closest_dtheta(t1,t2,window=101,dt=1):
+    """
+    Return relative index of closest data point. How much t2 has to be shifted to match t1.
+
+    Params:
+    -------
+    t1 (ndarray)
+    t2 (ndarray)
+    window (int=101)
+        Width of window for searching for min distance. Must be odd.
+    dt (float=1)
+        dt spacing corresponding to index.
+    """
+    assert (window%2)==1
+    
+    mnix = np.zeros((len(t1)-window),dtype=int)
+    for i,tix in enumerate(xrange(window//2,len(t1)-window//2-1)):
+        mnix[i] = np.argmin(abs(t2[tix]-t1[tix-window//2:tix+window//2]))-window//2
+    return mnix*dt
 
 def project_gaze_to_plane(pitch,yaw,pos,
                           dpitch=None,dyaw=None,dpos=None,
@@ -239,28 +579,28 @@ def match_time(x,t,dt,spline_kwargs={},offset=0,use_univariate=False,
     "proportional" the length of the data by fixing the number of knots to be proportional to the length of
     the data set.
 
-    Params:
-    -------
-    x (ndarray)
+    Parameters
+    ----------
+    x : ndarray
         n_time x n_dim
-    t (ndarray of datetime.datetime)
-    spline_kwargs (dict)
-    offset (float)
+    t : ndarray of datetime.datetime
+    spline_kwargs : dict
+    offset : float
         Offset to time vector.
-    use_univariate (bool=False)
+    use_univariate : bool,False
         By default, use LSQUnivariateSpline which allows us to choose the knots which is useful for comparable
         fits on data sets of different sizes.
-    knot_spacing (float=1/30)
+    knot_spacing : float,1/30
         Distance between uniformly spaced knots.
 
-    Returns:
-    --------
+    Returns
+    -------
     xSpline (UnivariateSpline or MultiUnivariateSpline)
     tLin (ndarray)
     """
     t = t-t[0]
     t = np.array([t_.total_seconds() for t_ in t])+offset
-    tLin = np.arange(t[-1]/dt)*dt+offset
+    tLin = np.arange((t[-1]-offset)/dt)*dt+offset
     
     if x.ndim==1:
         if use_univariate:
@@ -371,44 +711,6 @@ def spec_and_phase(X,noverlap,
 
     phase = np.angle(spec)
     return f,t,spec,phase
-
-def pipeline_phase_lag(v1,v2,dt,
-                       maxshift=60,
-                       windowlength=100,
-                       v_threshold=.03,
-                       measure='dot',
-                       save='temp.p'):
-    """
-    Find phase lag for each dimension separately and for the vector including all dimensions together.
-    
-    Params:
-    -------
-    v1,v2,dt
-    maxshift (int=60)
-    windowlength (int=100)
-    v_threshold (float=.03)
-    save (str='temp.p')
-    """
-    import cPickle as pickle
-
-    phasexyz,overlapcostxyz = [],[]
-    for i in xrange(3):
-        p,o = phase_lag(v1[:,i],v2[:,i],maxshift,windowlength,
-                        measure=measure,dt=dt)
-        phasexyz.append(p)
-        overlapcostxyz.append(o)
-    phase,overlapcost = phase_lag(v1,v2,maxshift,windowlength,
-                                  measure=measure,dt=dt)
-    
-    if save:
-        print "Pickling results as %s"%save
-        pickle.dump({'phase':phase,'overlapcost':overlapcost,
-                     'phasexyz':phasexyz,'overlapcostxyz':overlapcostxyz,
-                     'maxshift':maxshift,'windowlength':windowlength,
-                     'measure':measure,
-                     'v1':v1,'v2':v2},
-                    open(save,'wb'),-1)
-    return phasexyz,phase,overlapcostxyz,overlapcost
 
 def quaternion_to_rot(q,normalize=False):
     """
@@ -1169,3 +1471,13 @@ def train_cal_noise(leaderW,followerW,dv,nTrainSamples=None):
     gpr.fit(trainX,trainY)
     
     return gpr,np.corrcoef(gpr.predict(testX).ravel(),testY.ravel())[0,1]
+
+
+
+# ===== #
+# Tests #
+# ===== #
+def test_rotate_xy():
+    assert np.isclose( rotate_xy(np.array([[0,1],[1,0],[0,-1],[-1,0]]),np.pi/2),
+                       np.array([[-1,0],[0,1],[1,0],[0,-1]]) ).all()
+

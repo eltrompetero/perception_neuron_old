@@ -18,13 +18,51 @@ from scipy.interpolate import LSQUnivariateSpline,UnivariateSpline
 import entropy.entropy as info
 from scipy.signal import fftconvolve
 from misc.utils import unique_rows
-import load,utils
+import data_access,utils
 
 
 
 # ------------------- #
 # Plotting functions. #
 # ------------------- #
+def shade_windows(vis,ax,t=None,
+                  fill_kwargs={'color':'k','alpha':.2},
+                  set_label=True):
+    """
+    Given axes, shade in the places where the avatar is invisible.
+
+    Parameters
+    ----------
+    vis : ndarray
+    ax : AxesSubplot
+    t : ndarray,None
+    fill_kwargs : dict,{}
+    set_label : bool,True
+    
+    Returns
+    -------
+    None
+    """
+    if t is None:
+        t = np.arange(len(vix))
+    
+    # Where invisible regions start.
+    startix = np.where(np.diff(vis)==-1)[0]
+    # and where they end
+    endix = np.where(np.diff(vis)==1)[0]
+    if endix[0]<startix[0]:
+        startix = np.concatenate([[0],startix])
+    if len(startix)>len(endix):
+        endix = np.concatenate([endix,[len(vis)-1]])
+
+    ylim = ax.get_ylim()
+    xlim = ax.get_xlim()
+
+    for t0,t1 in zip(startix,endix):
+        h = ax.fill_between([t[t0],t[t1]],*ylim,lw=0,**fill_kwargs)
+    h.set_label('Invisible')
+    ax.set(ylim=ylim,xlim=xlim)
+
 def time_occlusion_trial(mbT,mbV,anT,anV,startEnd,visible,invisible,
                          fig=None,ax=None,
                          ylabel='Velocity (m/s)',
