@@ -131,7 +131,7 @@ def subject_settings_v3_2(index,return_list=True):
 
 def subject_settings_v3_3(index,hand,return_list=True):
     """
-    Subject info for experiment v3.3.
+    Subject info for experiment v3.3. Twoples refer to the left and right subject hands.
     2018-01-15
 
     Parameters
@@ -148,17 +148,56 @@ def subject_settings_v3_3(index,hand,return_list=True):
     """
     settings = [{'person':'Subject01_3_3',
                  'trials':['avatar'],
-                 'reverse':[False,True]},
+                 'reverse':[False,True],
+                 'usable':[True,False]},
                 {'person':'Subject02_3_3',
                  'trials':['avatar'],
-                 'reverse':[True,False]}
+                 'reverse':[False,True],
+                 'usable':[True,True]},
+                {'person':'Subject03_3_3',
+                 'trials':['avatar'],
+                 'reverse':[False,True],
+                 'usable':[True,False]},
+                {'person':'Subject04_3_3',
+                 'trials':['avatar'],
+                 'reverse':[False,True],
+                 'usable':[True,True]},
+                {'person':'Subject05_3_3',
+                 'trials':['avatar'],
+                 'reverse':[False,True],
+                 'usable':[True,True]},
+                {'person':'Subject06_3_3',
+                 'trials':['avatar'],
+                 'reverse':[True,False],
+                 'usable':[True,True]},
+                {'person':'Subject07_3_3',
+                 'trials':['avatar'],
+                 'reverse':[True,False],
+                 'usable':[True,True]},
+                {'person':'Subject08_3_3',
+                 'trials':['avatar'],
+                 'reverse':[True,False],
+                 'usable':[True,True]},
+                {'person':'Subject09_3_3',
+                 'trials':['avatar'],
+                 'reverse':[True,False],
+                 'usable':[True,False]},
+                {'person':'Subject10_3_3',
+                 'trials':['avatar'],
+                 'reverse':[False,True],
+                 'usable':[True,False]},
+                {'person':'Subject11_3_3',
+                 'trials':['avatar'],
+                 'reverse':[True,False],
+                 'usable':[True,True]},
                 ][index]
     dr = '../data/UE4_Experiments/%s/%s'%(settings['person'],hand)
     rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'))['rotAngle']
     reverse=settings['reverse'][0] if hand=='left' else settings['reverse'][1]
+    usable=settings['usable'][0] if hand=='left' else settings['usable'][1]
 
     if return_list:
-        return settings['person'],dr,rotAngle,reverse
+        return settings['person'],dr,rotAngle,reverse,usable
     return settings,dr
 
 
@@ -167,7 +206,10 @@ def subject_settings_v3_3(index,hand,return_list=True):
 # Class definitions. #
 # ------------------ #
 class VRTrial3_1(object):
-    def __init__(self,person,modelhandedness,rotation,dr,fname='trial_dictionaries.p',reverse=False):
+    def __init__(self,person,modelhandedness,rotation,dr,
+                 fname='trial_dictionaries.p',
+                 reverse=False,
+                 retrain=True):
         """
         Parameters
         ----------
@@ -223,6 +265,9 @@ class VRTrial3_1(object):
         self.templateSplitTrials = data['templateSplitTrials']
         self.subjectSplitTrials = data['subjectSplitTrials']
         self.windowsByPart = data['windowsByPart']
+        
+        if retrain:
+            self.retrain_gprmodel()
 
     def info(self):
         print "Person %s"%self.person
@@ -496,19 +541,21 @@ class VRTrial3_1(object):
                             [mod_angle( s-t ) for s,t in zip(subjectPhase[i][1],templatePhase[i][1])] ))
         return dphase
 
-    def retrain_gprmodel(self,**gpr_kwargs):
+    def retrain_gprmodel(self,start_ix=60,**gpr_kwargs):
         """Train gprmodel again. This is usually necessary when the GPR class is modified and the performance
         values need to be calculated again.
 
         Parameters
         ----------
+        start_ix : int,60
+            Time index at which to start comparing trajectories. Since dt=1/30, 60 corresponds to 2 seconds.
         **gpr_kwargs
         """
         from coherence import DTWPerformance,GPR
         perfEval=DTWPerformance()
         gprmodel=GPR(tmin=self.gprmodel.tmin,tmax=self.gprmodel.tmax,
                      fmin=self.gprmodel.fmin,fmax=self.gprmodel.fmax,
-                     mean_performance=self.gprmodel.mean_performance,
+                     mean_performance=self.gprmodel.performanceData.mean(),
                      **gpr_kwargs)
         p=np.zeros_like(self.gprmodel.performanceData)
         
@@ -516,7 +563,7 @@ class VRTrial3_1(object):
         for i,(t,sv,avv) in enumerate(zip(self.timeSplitTrials['avatar'],
                                           self.subjectSplitTrials['avatar'],
                                           self.templateSplitTrials['avatar'])):
-            p[i]=perfEval.time_average(avv[75:,1:],sv[75:,1:],dt=1/30)
+            p[i]=perfEval.time_average(avv[60:,1:],sv[60:,1:],dt=1/30)
             
             f=self.gprmodel.fractions[i]
             dur=self.gprmodel.durations[i]
@@ -533,7 +580,7 @@ class VRTrial3_1(object):
         disp : bool,False
         """
         from axis_neuron import extract_AN_port
-        from pipeline import extract_motionbuilder_model3
+        from pipeline import extract_motionbuilder_model3_3
         from utils import match_time
         from ue4 import load_visibility
         import dill as pickle
@@ -566,8 +613,8 @@ class VRTrial3_1(object):
             exptStartEnd = [visible[0],invisible[-1]]
             
             # Extract template. Downsample to 30Hz from 60Hz.
-            mbV,mbT = extract_motionbuilder_model3( self.modelhandedness[trialno],
-                                                    reverse_time=self.reverse )
+            mbV,mbT = extract_motionbuilder_model3_3( self.modelhandedness[trialno],
+                                                      reverse_time=self.reverse )
             showIx = mbT < (exptStartEnd[1]-exptStartEnd[0]).total_seconds()
             templateTrial[part+'T'] = mbT[showIx][::2]
             templateTrial[part+'V'] = mbV
@@ -663,18 +710,24 @@ class VRTrial3_1(object):
                 ix_ = (np.array(spec)[None,:]==trialWindows).all(1)
                 if ix_.any():
                     ix=np.where(ix_)[0].tolist()
+                else:
+                    ix=[]
         elif type(precision) is float:
             for spec in specs:
                 specDiffs = np.abs( trialWindows-np.array(spec)[None,:] )
                 ix_ = (specDiffs<=precision).all(1)
                 if ix_.any():
                     ix=np.where(ix_)[0].tolist()
+                else:
+                    ix=[]
         elif type(precision) is tuple:
             for spec in specs:
                 specDiffs = np.abs( trialWindows-np.array(spec)[None,:] )
                 ix_ = (specDiffs[:,0]<=precision[0])&(specDiffs[:,1]<=precision[1])
                 if ix_.any():
                     ix=np.where(ix_)[0].tolist()
+                else:
+                    ix=[]
         else:
             raise NotImplementedError("precision type not supported.")
 
