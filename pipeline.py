@@ -849,8 +849,7 @@ def extract_motionbuilder_model3_3(hand,
     from scipy.interpolate import interp1d
     assert hand=='Left' or hand=='Right'
 
-    dr = ( os.path.expanduser('~')+'/Dropbox/Research/tango/data/UE4_Experiments/'+
-           'Animations/Eddie_Grid_Model' )
+    dr = ( os.path.expanduser('~')+'/Dropbox/Eddie_Grid_Model' )
     fname = fname%hand
     
     # Create pickle if it doesn't already exist.

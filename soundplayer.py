@@ -6,7 +6,7 @@ from scipy.special import expit
 import numpy.fft as fft
 
 
-SOUND_DIR = "soundfiles_short"
+SOUND_DIR = "soundfiles_final"
 
 
 def load_sound(filename):
@@ -120,15 +120,20 @@ if __name__ == '__main__':
 	smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
 	smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
 
+
+
+	reverse = 'rev' in sys.argv
+	hand = 'left' if reverse else 'right'
+	if reverse: 
+		smooth_data = smooth_data[::-1]
+		print "doing it reverse"
+
+
+	# Interpolation
 	data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
 	
 
-	print "done loading data"
-
-	# Original frequency
-	# Interpolation
-
-	function_dict = {'exp': (np.exp, 0.5), 'log': (np.log,2.0), 'sig': (expit,10.0), '': (lambda x : x, 32.0)}
+	function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}
 
 	if not os.path.exists(SOUND_DIR) : os.mkdir(SOUND_DIR)
 	
@@ -140,21 +145,21 @@ if __name__ == '__main__':
 
 
 	function, factor = function_dict[key]
-	print((key, factor))
+	print("function %s with factor %f"%(key,factor))
 
 
 	wav_samplerate = 44100.0
 
 	# opening wav file
-	wavef = wave.open(os.path.join(SOUND_DIR,"interpolate_merged_"+key+".wav"),'w')
+	wavef = wave.open(os.path.join(SOUND_DIR,"interpolate_merged_"+key+"_"+hand+".wav"),'w')
 	wavef.setnchannels(1)
 	wavef.setsampwidth(2) 
 	wavef.setframerate(wav_samplerate)
 	
 
 
-	max_x = len(smooth_data)/60 if len(sys.argv) <=2  else int(sys.argv[2])
-	print max_x
+	max_x = len(smooth_data)/60 if len(sys.argv) <=3  else int(sys.argv[3])
+	print("creating file with %f seconds"%max_x)
 
 	# Scaling the original Range 
 	# ex ) np.exp(min_value*factor)*2.0*np.pi
@@ -175,13 +180,15 @@ if __name__ == '__main__':
 
 	yvals = []
 	ycums = []
+	yadds = []
 
 	while x_val<max_x:
 		y_val  = data_fx(x_val)
 		yvals.append(y_val)
 		y_add  = function(y_val*factor) #rescaled and transformed
-		y_add  = y_add/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
-		y_cum += y_add*x_val # f(t)*t
+		y_add  = (y_add-myMinVal)/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
+		yadds.append(y_add)
+		y_cum += y_add/wav_samplerate # f(t)*t
 		ycums.append(y_cum)
 		amp    = np.sin(y_cum*2.0*np.pi)
 		x_val += step
