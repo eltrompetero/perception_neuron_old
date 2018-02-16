@@ -1,12 +1,12 @@
 import os, wave, struct, math, sys, numpy as np, matplotlib.pyplot as plt
 from pipeline import extract_motionbuilder_model3_3
-from itertools import izip
+from scipy.signal import fftconvolve
 from scipy import interpolate as itp
 from scipy.special import expit
 import numpy.fft as fft
 
 
-SOUND_DIR = "soundfiles"
+SOUND_DIR = "soundfiles_short"
 
 
 def load_sound(filename):
@@ -117,64 +117,75 @@ if __name__ == '__main__':
 	time = v.x
 	data = v.y
 	data_amp = [np.linalg.norm(x) for x in data]
+	smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
+	smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
 
-	wav_samplerate = 44100.0
+	data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
+	
 
-	f = lambda x : x*240
-
-	data_chunks = list(chunks(data_amp,600))
+	print "done loading data"
 
 	# Original frequency
 	# Interpolation
 
-	function_dict = {'exp': np.exp, 'log': np.log, 'sig': expit}
+	function_dict = {'exp': (np.exp, 0.5), 'log': (np.log,2.0), 'sig': (expit,10.0), '': (lambda x : x, 32.0)}
 
+	if not os.path.exists(SOUND_DIR) : os.mkdir(SOUND_DIR)
 	
-	wavef = wave.open(os.path.join(SOUND_DIR,"interpolate_merged.wav",'w'))
+
+	if (any (map(lambda x : x in function_dict, sys.argv))) :
+		key = filter(lambda x : x in function_dict, sys.argv)[0]
+	else:
+		key = ''
+
+
+	function, factor = function_dict[key]
+	print((key, factor))
+
+
+	wav_samplerate = 44100.0
+
+	# opening wav file
+	wavef = wave.open(os.path.join(SOUND_DIR,"interpolate_merged_"+key+".wav"),'w')
 	wavef.setnchannels(1)
 	wavef.setsampwidth(2) 
 	wavef.setframerate(wav_samplerate)
 	
-	data_fx = itp.interp1d(range(len(data_amp)),data_amp)
 
-	cumm = 0
-	max_x = len(data_amp) if len(sys.argv) <= 1 else int(sys.argv[1])
 
-	step = 60.0/44100.0
+	max_x = len(smooth_data)/60 if len(sys.argv) <=2  else int(sys.argv[2])
+	print max_x
+
+	# Scaling the original Range 
+	# ex ) np.exp(min_value*factor)*2.0*np.pi
+
+	myMinVal = function(min(smooth_data)*factor)
+	myMaxVal = function(max(smooth_data)*factor)
+	myRange = myMaxVal-myMinVal
+
+
+	MIN_FREQ = 150.0
+	MAX_FREQ = 1000.0
+
+	step = 1.0/wav_samplerate
 	x_val = 0.0
 	y_cum = 0
 
+	ind = 0
 
-	while x_val<max_x :
+	yvals = []
+	ycums = []
+
+	while x_val<max_x:
 		y_val  = data_fx(x_val)
-		y_cum += (y_val*2.0*np.pi)/32.0
-		amp    = np.sin(y_cum)
+		yvals.append(y_val)
+		y_add  = function(y_val*factor) #rescaled and transformed
+		y_add  = y_add/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
+		y_cum += y_add*x_val # f(t)*t
+		ycums.append(y_cum)
+		amp    = np.sin(y_cum*2.0*np.pi)
 		x_val += step
 		wavef.writeframesraw(struct.pack('<h',amp*32767))
 
 	wavef.writeframes('')
 	wavef.close()	
-
-
-	# First dividing and then interpolating
-
-	# wavef = wave.open("../interpolate_exp.wav",'w')
-	# wavef.setnchannels(1)
-	# wavef.setsampwidth(2) 
-	# wavef.setframerate(wav_samplerate)
-
-	# for i, data_chunk in list(enumerate(data_chunks))[:1]:
-	# 	newx = np.linspace(0,len(data_chunk)-1,wav_samplerate*len(data_chunk)/60)
-	# 	newy = data_fx(newx)
-	# 	freq = newy
-	# 	freq_time = [a*b for a,b in zip(freq,np.linspace(1,len(data_chunk)/60,wav_samplerate*len(data_chunk)/60+1))]
-	# 	freq_2pi = map(lambda x : 2.0*np.pi*np.exp(x)/500, freq_time)
-	# 	# save_sound("../interpolate.wav",amp,44100,wav_samplerate=44100)
-	# 	freq_csed   = np.cumsum(np.array(freq_2pi))
-	# 	amp3 = np.sin(freq_csed)
-	# 	cumm = freq_csed[-1]
-	# 	for value in amp3:
-	# 		wavef.writeframesraw(struct.pack('<h',value*32767))	
-
-	# wavef.writeframes('')
-	# wavef.close()
