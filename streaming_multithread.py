@@ -10,6 +10,6 @@ endThread = threading.Thread(target = ss.pause)
 
 
 startThread.start()
-print "endThread start"
 time.sleep(10)
+print "endThread start"
 endThread.start()
