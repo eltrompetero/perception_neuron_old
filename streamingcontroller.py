@@ -4,25 +4,29 @@ import time
 import pygame, sys
 import pygame.locals
 
+# Soundstreamer
 ss = SoundStreamer()
-
 ss.init()
-# startThread = threading.Thread(target = ss.update)
-# addThread = threading.Thread(target = ss.addToStream, args = (10,))
-# endThread = threading.Thread(target = ss.pause)
-ss.addToStream(10);
+
+ss.addToStream(10)
+
+#For Keyboard handling
 pygame.init()
 
 data = [440,880,220,110,550]
 
 while True:	
 	ss.update()	
+
+	# Keep buffer in soundstreamer to length 10
 	if len(ss.inputbuffer)<10:
 		ss.addToStream(np.random.choice(data));		
 		last = time.time()
 	else:
 		if time.time() - last > 10:
 			ss.inputbuffer = []
+
+	# Key handling
 	for event in pygame.event.get():
 		if event.type == pygame.locals.KEYDOWN:
 			print "key pressed"
