@@ -7,7 +7,7 @@ from scipy.special import expit
 
 
 class SoundStreamer():
-	def __init__(self, fadeout = 1.0, volume = 0.5):
+	def __init__(self, fadeout = 3.0, volume = 0.5):
 		self.fadeout = fadeout
 		self.p = pyaudio.PyAudio()
 		self.stream = self.p.open(format=pyaudio.paFloat32,channels=2,rate=44100,output=True)
@@ -33,9 +33,12 @@ class SoundStreamer():
 
 
 	def playSound(self):
+		if len(self.inputbuffer)==0:
+			return
+		print self.inputbuffer[-1]
 		data = [440.0, 350.0, 220.0, 550.0, 330.0]
 		duration = 1.0
-		f = np.random.choice(data)
+		f = self.inputbuffer[-1]
 		samples = (np.sin(2*np.pi*np.arange(self.fs*duration)*f/self.fs)).astype(np.float32)
 		self.stream.write(self.volume*samples)
 		
@@ -57,30 +60,42 @@ class SoundStreamer():
 
 	def addToStream(self, value):
 		# precondition : data is added one by one
-		timestamp = time.time()
+		if not self.playing:
+			self.playing = True
+		print "adding to stream"
+		self.timestamp = time.time()
 		self.inputbuffer.append(value)
 
 
 	def resume(self):
 		self.playing = True
-		self.playSound()
+		self.timestamp = time.time()
+		self.pauseEvent.clear()
 
 
-	def start(self):
+	def init(self):
 		self.playing = True
 
 
 	def update(self):
-		self.fadeOut()
-		if self.timestamp!=None and time.time()-self.timestamp >= self.fadeout:
-			self.paused = True
-			self.playing = False
-			self.pause(True)
+		if not self.pauseEvent.is_set() and self.timestamp!=None and time.time()-self.timestamp <= self.fadeout:			
+			self.playSound()
+			time.sleep(0.2)
+			print "playing"
+
+
+		if self.pauseEvent.is_set():
+			print "not playing. pauseEvent Set"
 			return
 
-		while not self.pauseEvent.is_set():			
-			self.playSound()
-		print "playing"
+		timestamp = self.timestamp if self.timestamp!=None else 0
+		if not (self.timestamp!=None and time.time()-self.timestamp <= self.fadeout):
+			print "not playing because data starved for " + str(time.time()-timestamp) + " seconds"
+			# if self.timestamp!=None and time.time()-self.timestamp >= self.fadeout:
+			# 	print "not called for more than x seconds"
+			# 	self.playing = False
+			# 	break
+		
 
 		#Do interpolation here
 
