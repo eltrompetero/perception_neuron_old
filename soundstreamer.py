@@ -7,8 +7,9 @@ from scipy.special import expit
 
 
 class SoundStreamer():
-	def __init__(self, fadeout = 3.0, volume = 0.5):
+	def __init__(self, fadeout = 3.0, fadeout_start = 1.0, volume = 0.5):
 		self.fadeout = fadeout
+		self.fadeout_start = fadeout_start
 		self.p = pyaudio.PyAudio()
 		self.stream = self.p.open(format=pyaudio.paFloat32,channels=2,rate=44100,output=True)
 
@@ -26,6 +27,7 @@ class SoundStreamer():
 		self.playing = False
 		self.paused = False
 		self.volume = volume
+		self.origvolume = volume
 
 		self.playEvent  = threading.Event()
 		self.pauseEvent = threading.Event()
@@ -78,10 +80,15 @@ class SoundStreamer():
 
 
 	def update(self):
-		if not self.pauseEvent.is_set() and self.timestamp!=None and time.time()-self.timestamp <= self.fadeout:			
+
+		currtime = time.time()
+		if not self.pauseEvent.is_set() and self.timestamp!=None and currtime-self.timestamp <= self.fadeout:			
 			self.playSound()
-			time.sleep(0.2)
-			print "playing"
+			if currtime-self.timestamp > self.fadeout_start:
+				self.volume *= 0.5
+			else:
+				self.volume = self.origvolume
+
 
 
 		if self.pauseEvent.is_set():
@@ -89,8 +96,8 @@ class SoundStreamer():
 			return
 
 		timestamp = self.timestamp if self.timestamp!=None else 0
-		if not (self.timestamp!=None and time.time()-self.timestamp <= self.fadeout):
-			print "not playing because data starved for " + str(time.time()-timestamp) + " seconds"
+		if not (self.timestamp!=None and currtime-self.timestamp <= self.fadeout):
+			print "not playing because data starved for " + str(currtime-timestamp) + " seconds"
 			# if self.timestamp!=None and time.time()-self.timestamp >= self.fadeout:
 			# 	print "not called for more than x seconds"
 			# 	self.playing = False
