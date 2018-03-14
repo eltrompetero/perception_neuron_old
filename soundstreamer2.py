@@ -1,4 +1,4 @@
-import time,threading, os, wave, struct, math, sys, pyaudio, numpy as np, numpy.fft as fft, matplotlib.pyplot as plt
+import time,threading, socket, os, wave, struct, math, pickle, sys, pyaudio, numpy as np, numpy.fft as fft, matplotlib.pyplot as plt
 import sounddevice
 from pipeline import extract_motionbuilder_model3_3
 from scipy.signal import fftconvolve
@@ -7,24 +7,24 @@ from scipy.special import expit
 
 
 
-class SoundStreamer():
-	def __init__(self, fadeout = 3.0, fadeout_start = 1.0, volume = 0.5):
+class SoundStreamer2():
+	def __init__(self, host, port, fadeout = 3.0, fadeout_start = 1.0, volume = 0.5):
 		self.fadeout = fadeout
 		self.fadeout_start = fadeout_start
 
-		self.sounddevice = sounddevice
 		self.p = pyaudio.PyAudio()
 		self.stream = self.p.open(format=pyaudio.paFloat32,channels=2,rate=44100,output=True)
 
 		# timestamp for fadeout
 		self.timestamp = None
+
 		# input buffer where any outside data is stored
 		self.inputbuffer = []
 		# buffer for data interpolation
 		self.ipdbuffer = np.array([])
 
-
-		self.duration = 2.0
+		# default duration and wave sampling frequency
+		self.duration = 8.0
 		self.frequency = 44100
 
 		# flag for playing & pausing
@@ -32,61 +32,65 @@ class SoundStreamer():
 		self.paused = False
 
 		self.volume = volume
-		# for fade out
 		self.origvolume = volume
 
 		self.playEvent  = threading.Event()
 		self.pauseEvent = threading.Event()
+		self.recvPauseEvent = threading.Event()
+
+		# socket for receiving data
+		self.socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+		self.socket.bind((host,port))
+		self.socket.settimeout(10);
 
 
 
 	def playSound(self):		
-		print "playingSound"
-		samples1 = self.ipdbuffer.astype(np.float32)		
-		self.stream.write(self.volume*samples1)
-		self.ipdbuffer=np.array([])
+		while not self.pauseEvent.is_set():
+			print "playing"
+			samples1 = np.array(self.ipdbuffer[:len(self.ipdbuffer)]).astype(np.float32)
+			print samples1
+			print "sample len : " + str(len(samples1))
+			self.stream.write(self.volume*samples1)
+		# if len(self.inputbuffer) > 100:
+		# 	del self.inputbuffer[:8]
 		
 
 
-	def pause(self, fadeout = True):
-		if (fadeout):
-			self.fadeOut()
+	def pause(self):
 		self.playing = False
 		self.paused = True
 		print "pausing sound"
 		self.pauseEvent.set()
 
 
-	def fadeOut(self):
-		pass
-		# fadeout
+	def pauseRecv(self):
+		self.recvPauseEvent.set()
 
 
-	def addToStream(self, value):
+	def addToStream(self):
+		while not self.recvPauseEvent.is_set():
+			print "adding"
+			recvdata = pickle.loads(self.socket.recv(1024))
 		# precondition : data is added one by one
-		if not self.playing:
-			self.playing = True
-		prevtimestamp = self.timestamp
-		self.timestamp = time.time()
-		self.inputbuffer.append(value)
-		# print "prev : " + str(prevtimestamp) + ", new : " + str(self.timestamp) 
+			prevtimestamp = self.timestamp
+			self.timestamp = time.time()
+			self.inputbuffer+=list(recvdata)
 
 
 	def interpolate(self, key='exp'):
-		function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}		
-		arr = np.arange(self.duration*self.frequency)*self.inputbuffer[0]
-		self.ipdbuffer = np.sin(arr/self.frequency).astype(np.float32)
-		print len(self.ipdbuffer)
-		del self.inputbuffer[0]
-		# datas = self.inputbuffer[:10]
-		
-		# if len(self.ipdbuffer) > self.frequency:
-		# 	break
-		# for data in datas:
-		# 	self.ipdbuffer = np.append(self.ipdbuffer,((np.sin(2*np.pi*np.arange(self.frequency*self.duration)*data/self.frequency)).astype(np.float32)))
-		
-		# print "buffer len : " + str(len(self.ipdbuffer))
-		# del self.inputbuffer[:10]
+		function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}
+
+		while not self.pauseEvent.is_set():
+			datas = self.inputbuffer[:10]
+			
+			# if len(self.ipdbuffer) > self.frequency:
+			# 	break
+			for data in datas:
+				self.ipdbuffer = np.append(self.ipdbuffer,((np.sin(2*np.pi*np.arange(self.frequency*self.duration)*data/self.frequency)).astype(np.float32)))
+			
+			print "buffer len : " + str(len(self.ipdbuffer))
+			del self.inputbuffer[:10]
 
 		# smooth_data = fftconvolve(self.inputbuffer,np.ones(12)/12.0)
 		# smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]

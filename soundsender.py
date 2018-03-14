@@ -1,17 +1,18 @@
 ''' class for calculating and sending sound'''
 
 
-import socket
+import socket, time, signal, threading, sys, pickle
+import numpy as np
 
 
 HOST = '127.0.0.1'   # use '' to expose to all networks
-PORT = 7006  # Calculation data.
+PORT = int(sys.argv[1])  # Calculation data.
 
 class SoundSender():
 	def __init__(self, host=HOST, port=PORT):
 		self.socket = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-		self.host = HOST
-		self.buffersize = 1024
+		self.host = host
+		self.buffersize = 65535
 		self.port = port
     	
 
@@ -24,10 +25,15 @@ class SoundSender():
 
 
 
-if __name__ == '__main__':
-	datas = [440 for x in range(10)]
-	ss = SoundSender()
-	for data in datas:
-		ss.socket.sendto(str(data),(ss.host,PORT))
 
-	ss.socket.sendto('done',(ss.host,PORT))
+if __name__ == '__main__':
+	start = time.time()
+	datas = [440.0, 880.0, 220.0, 550.0, 770.0]
+	ss = SoundSender()
+	handler = lambda x,y : ss.close()
+	signal.signal(signal.SIGINT, handler)
+	while True:
+		data = pickle.dumps(np.random.choice(datas,10))
+		ss.socket.sendto(data,(ss.host,PORT))
+
+	

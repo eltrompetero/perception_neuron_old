@@ -144,6 +144,7 @@ class SoundPlayer():
 			# else:
 			# 	wavef.writeframesraw(struct.pack('<hh',amp*32767,amp*32767/4))
 
+
 		stream.write(np.array(amps).astype(np.float32))
 		# wavef.writeframes('')
 		# wavef.close()	
