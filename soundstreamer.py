@@ -44,12 +44,20 @@ class SoundStreamer():
 		self.origvolume = volume
 
 		self.pauseEvent = threading.Event()
+		self.stopEvent = threading.Event()
+
+		# self.lock = threading.Lock()
 
 
 
 	def playSound(self):		
 		# print "playingSound"
-		self.stream.write(self.ipdbuffer)		
+		while not self.stopEvent.is_set():
+			# self.lock.acquire()
+			print "playing"
+			# print self.inputbuffer
+			self.stream.write(self.ipdbuffer)		
+			# self.lock.release()
 
 
 	def pause(self):
@@ -61,23 +69,28 @@ class SoundStreamer():
 
 	def addToStream(self, value):
 		# update timestamp
-		self.timestamp = time.time()
-		self.inputbuffer.append(value)
+		# self.lock.acquire()
+		while not self.stopEvent.is_set():
+			print "adding to stream"
+			self.timestamp = time.time()
+			self.inputbuffer.append(value)
+			print self.inputbuffer
+		# self.lock.release()
 
 
 	def interpolate(self, key='exp'):
-		if len(self.inputbuffer)<2:
-			return False
-		function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}		
-		ipd = itp.interp1d(np.arange(len(self.inputbuffer)),self.inputbuffer)
-		data1sec = np.linspace(0,len(self.inputbuffer)-1,44100)
-		ipd_data = ipd(data1sec)
-		arr = ipd_data#np.arange(self.duration*self.frequency)*self.inputbuffer[0]
-		self.ipdbuffer = np.sin(arr).astype(np.float32)
+		# self.lock.acquire()
+		# print "interpolating"
+		while not self.stopEvent.is_set():
+			function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}		
+			ipd = itp.interp1d(np.arange(len(self.inputbuffer)),self.inputbuffer)
+			data1sec = np.linspace(0,len(self.inputbuffer)-1,44100)
+			ipd_data = ipd(data1sec)
+			arr = ipd_data#np.arange(self.duration*self.frequency)*self.inputbuffer[0]
+			self.ipdbuffer = np.sin(arr).astype(np.float32)
+		# self.lock.release()
 		# self.stream.write(self.ipdbuffer)	# empty input buffer after interpolation.
 		# self.inputbuffer = []
-
-		return True
 
 
 	def resume(self):
@@ -90,6 +103,8 @@ class SoundStreamer():
 
 	def init(self):
 		self.playing = True
+		self.stopEvent.clear()
+		self.pauseEvent.clear()	
 
 
 	def update(self):
