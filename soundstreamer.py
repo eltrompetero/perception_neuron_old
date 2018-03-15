@@ -66,7 +66,7 @@ class SoundStreamer():
 
 
 	def interpolate(self, key='exp'):
-		if len(self.inputbuffer)<2:
+		if len(self.inputbuffer)<60:
 			return False
 		function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}		
 		ipd = itp.interp1d(np.arange(len(self.inputbuffer)),self.inputbuffer)
@@ -75,7 +75,7 @@ class SoundStreamer():
 		arr = ipd_data#np.arange(self.duration*self.frequency)*self.inputbuffer[0]
 		self.ipdbuffer = np.sin(arr).astype(np.float32)
 		# self.stream.write(self.ipdbuffer)	# empty input buffer after interpolation.
-		# self.inputbuffer = []
+		self.inputbuffer = []
 
 		return True
 
