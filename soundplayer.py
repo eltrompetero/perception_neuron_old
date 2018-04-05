@@ -132,21 +132,10 @@ class SoundPlayer():
 			ind   += 1
 			amps.append(amp)
 			x_val += step
-			# amps.append(amp)
-			# if len(amps)==88200:
-			# 	print "writing"
-				
-			# 	amps=[]
-			# wavef.writeframesraw(struct.pack('<hh',0,amp*32767))
-
-			# if moveRight[ind]:
-			# 	wavef.writeframesraw(struct.pack('<hh',amp*32767/4,amp*32767))
-			# else:
-			# 	wavef.writeframesraw(struct.pack('<hh',amp*32767,amp*32767/4))
 
 		stream.write(np.array(amps).astype(np.float32))
-		# wavef.writeframes('')
-		# wavef.close()	
+		wavef.writeframes('')
+		wavef.close()	
 
 
 	def save_sound(self, filename, key, duration=None):

@@ -1,12 +1,13 @@
 ''' class for calculating and sending sound'''
 
 
-import socket, time, signal, threading, sys, pickle
+import socket, time, signal, threading, sys, pickle, wave
 import numpy as np
 
 
 HOST = '127.0.0.1'   # use '' to expose to all networks
 PORT = int(sys.argv[1])  # Calculation data.
+
 
 class SoundSender():
 	def __init__(self, host=HOST, port=PORT):
@@ -24,16 +25,28 @@ class SoundSender():
 
 
 
+def load_sound(filename):
+	wav = wave.open(filename,'r')
+	sig = wav.readframes('-1')
+	sif = np.fromstring(sig,'int16')
+	return sif
 
+
+
+sound = load_sound("interpolate_merged_exp.wav")
+datas = [440, 880, 220, 550, 330]
 
 if __name__ == '__main__':
-	start = time.time()
-	datas = [440.0, 880.0, 220.0, 550.0, 770.0]
-	ss = SoundSender()
-	handler = lambda x,y : ss.close()
-	signal.signal(signal.SIGINT, handler)
-	while True:
-		data = pickle.dumps(np.random.choice(datas,10))
-		ss.socket.sendto(data,(ss.host,PORT))
+	wavef = wave.open("interpolate_merged_exp.wav","r")
+	sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+	ind = 0
+	data = wavef.readframes(1024)
+	while data != "":
+		# data = pickle.dumps(sound[ind:ind+1024])
+		sock.sendto(str(np.random.choice(datas)),(HOST,PORT))
+		# data = wavef.readframes(1024)
+		# ind+=1024
+
+	sock.sendto("done",(HOST,PORT))
 
 	

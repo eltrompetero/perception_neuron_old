@@ -75,13 +75,21 @@ streamer.init()
 
 
 
+def read_test():
+    streamer.ipdbuffer = np.zeros(44100).tolist()
+    streamer.addToStream(880) 
+    streamer.interpolate()                    
+    streamer.playSound()
+    while True:
+        streamer.addToStream(880) 
+        streamer.interpolate()                    
+        # time.sleep(1.0)
+
+
+
 def read_and_compare():
     subIndex = left_hand_col_indices(False)
     t0 = datetime.now()
-    # ipdThread = threading.Thread(target = streamer.interpolate)
-    # ipdThread.start()
-    # playThread = threading.Thread(target = streamer.update)
-    # playThread.start()
     with ANReader(10.0,subIndex,port=7011,verbose=True,port_buffer_size=1024,recent_buffer_size=(10.0+1)*30) as reader:
         prevv = []
         while True:
@@ -89,16 +97,10 @@ def read_and_compare():
             if len(v)>0 and not (len(v)==len(prevv) and np.sum((v-prevv).flatten()**2)==0): # do we have enough data points?
                 avv = fetch_matching_avatar_vel(avatar,np.array(tAsDate),t0)
                 diff = np.linalg.norm(avv - v) # Send this data to streamer
-                streamer.addToStream(diff*100)
+                streamer.addToStream(880) 
                 streamer.interpolate()            
                 streamer.update()
                 prevv = v
-            # else :
-            #     print "len v == 0"
-            # streamer.update()
-
-
-        	    # streamer.
 
 
 
