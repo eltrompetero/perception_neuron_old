@@ -1,5 +1,6 @@
-import socket, pyaudio, threading, sys, pickle, pygame, time
+import socket, pyaudio, threading, sys, pickle, pygame, time, struct
 from scipy import interpolate as itp
+from scipy.interpolate import CubicSpline
 from port import *
 from datetime import datetime
 from axis_neuron import left_hand_col_indices,right_hand_col_indices
@@ -177,21 +178,40 @@ if __name__ == '__main__':
 
 	snd = []
 
+
+	datalength = 60
+	sec_per_point = duration*1.0/datalength
+
+	tail = 0
+
 	while True:
-		if data is not None and len(data) > 2 :
+		if data is not None and len(data) > 59 :
 			print "creating sound at " + str(time.time()-playstamp)
-			itpval = data[:50]
+			itpval = data[:60]
 			x = np.linspace(0,len(itpval),len(itpval))
 			y = itpval
 
+			# interpolate gaps using cubic spline
+			xf = [0,1]
+			yf = [tail,data[0]]
+
+			cs = CubicSpline(xf,yf)
+			xfran = np.linspace(0,1,sec_per_point*44100)
+			yfran = cs(xfran)
+
+
 			data_fx = itp.interp1d(x,y)
-			xran = np.linspace(0,len(itpval),duration*44100)
+			xran = np.linspace(0,len(itpval),(duration-sec_per_point)*44100)
 			yran = data_fx(xran)
-			ycum = np.cumsum(yran)*2.0*np.pi/44100
+
+			yran_total = np.append(yfran,yran)
+			ycum = np.cumsum(yran_total)*2.0*np.pi/44100
 
 			snd = (32767*np.cos(ycum+phaseOffset)).astype(np.int16)
 			phaseOffset += ycum[-1]
-			del data[:49] # Keep one for next interpolation
+
+			tail = itpval[-1]
+			del data[:60] # Keep one for next interpolation
 			
 			val = ''.join(map(lambda x : struct.pack('<h',x), snd))
 			
