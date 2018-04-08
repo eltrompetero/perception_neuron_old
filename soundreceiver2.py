@@ -182,12 +182,14 @@ if __name__ == '__main__':
 	datalength = 60
 	sec_per_point = duration*1.0/datalength
 
+	# initial tail should be 0
+	# tail is the last value of previous window that would be interpolated with the first value of current window
 	tail = 0
 
 	while True:
-		if data is not None and len(data) > 59 :
+		if data is not None and len(data) >= datalength :
 			print "creating sound at " + str(time.time()-playstamp)
-			itpval = data[:60]
+			itpval = data[:datalength]
 			x = np.linspace(0,len(itpval),len(itpval))
 			y = itpval
 
@@ -210,8 +212,8 @@ if __name__ == '__main__':
 			snd = (32767*np.cos(ycum+phaseOffset)).astype(np.int16)
 			phaseOffset += ycum[-1]
 
-			tail = itpval[-1]
-			del data[:60] # Keep one for next interpolation
+			tail = itpval[-1]  # Keep one for next interpolation
+			del data[:datalength]
 			
 			val = ''.join(map(lambda x : struct.pack('<h',x), snd))
 			
