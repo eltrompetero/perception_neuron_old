@@ -9,6 +9,8 @@ import pyaudio
 
 
 
+
+## Directory to save sound files
 SOUND_DIR = "soundfiles_leftright"
 
 
@@ -47,13 +49,24 @@ def chunks(l, n):
 	
 
 
-class SoundPlayer():
+class SoundConverter():
+	"""
+	Converts a motion sequence to a wav file.
+	"""
+
 	def __init__(self, directory, model_name, direction, reverse_time):
+
+
+		# Add any target models to this dictionary
 		self.models = {'3_3': extract_motionbuilder_model3_3 }
+		
 		self.model = self.models[model_name]
+
 		self.function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}
 		self.direction = direction
 		self.reverse = reverse_time
+
+		# Loading model
 		data, time = self.model(self.direction, reverse_time = self.reverse)
 		self.time = data.x
 		self.data = data.y
@@ -62,6 +75,12 @@ class SoundPlayer():
 
 
 	def save_sound_leftright(self, filename, key, duration=None):
+	"""
+	Save sound to different channel, right if the velocity is towards right
+	and left otherwise.
+	(Defunct)
+	"""
+
 		positions = self.data
 		moveRight = [dp[0] > 0 for dp in positions for x in range(44100/60)]
 
@@ -77,8 +96,7 @@ class SoundPlayer():
 
 		# Interpolation
 		data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
-		
-
+	
 		if not os.path.exists(self.directory) : os.mkdir(self.directory)
 		
 
@@ -89,13 +107,8 @@ class SoundPlayer():
 
 		wav_samplerate = 44100.0
 
-		# opening wav file
-		# wavef = wave.open(os.path.join(SOUND_DIR,'_'.join([filename,key,self.direction])+'.wav'),'w')
-		# wavef.setnchannels(2)
-		# wavef.setsampwidth(2) 
-		# wavef.setframerate(wav_samplerate)
 
-		max_x = 5#len(smooth_data)/60 if duration is None else duration
+		max_x = len(smooth_data)/60 if duration is None else duration
 		print("creating file with %f seconds"%max_x)
 
 		# Scaling the original Range 
@@ -139,6 +152,15 @@ class SoundPlayer():
 
 
 	def save_sound(self, filename, key, duration=None):
+	"""
+	Interpolate the velocity and save it as soundfile.
+	
+		filename : Desired file name (will be saved in SOUND_DIR)
+		key 	 : function that will be used to tune the input values. either exp, log, or sig
+		duration : Desired duration. If unspecified, the whole motion sequence will be converted to sound.
+
+	"""
+
 		data_amp = [np.linalg.norm(x) for x in self.data]
 		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
 		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
@@ -208,6 +230,8 @@ class SoundPlayer():
 
 
 if __name__ == '__main__':
-	sp = SoundPlayer(SOUND_DIR,"3_3","Right",False)
-	sp.save_sound_leftright("interpolate_leftright","exp")
+	converter = SoundConverter(SOUND_DIR,"3_3","Right",False)
+
+	# Sample Usage below
+	# converter.save_sound("interpolate_leftright","exp")
 
