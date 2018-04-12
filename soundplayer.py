@@ -50,9 +50,9 @@ def chunks(l, n):
 
 
 class SoundConverter():
-	"""
+	'''
 	Converts a motion sequence to a wav file.
-	"""
+	'''
 
 	def __init__(self, directory, model_name, direction, reverse_time):
 
@@ -75,12 +75,6 @@ class SoundConverter():
 
 
 	def save_sound_leftright(self, filename, key, duration=None):
-	"""
-	Save sound to different channel, right if the velocity is towards right
-	and left otherwise.
-	(Defunct)
-	"""
-
 		positions = self.data
 		moveRight = [dp[0] > 0 for dp in positions for x in range(44100/60)]
 
@@ -152,15 +146,14 @@ class SoundConverter():
 
 
 	def save_sound(self, filename, key, duration=None):
-	"""
-	Interpolate the velocity and save it as soundfile.
-	
-		filename : Desired file name (will be saved in SOUND_DIR)
-		key 	 : function that will be used to tune the input values. either exp, log, or sig
-		duration : Desired duration. If unspecified, the whole motion sequence will be converted to sound.
+		'''
+		Interpolate the velocity and save it as soundfile.
+		
+			filename : Desired file name (will be saved in SOUND_DIR)
+			key 	 : function that will be used to tune the input values. either exp, log, or sig
+			duration : Desired duration. If unspecified, the whole motion sequence will be converted to sound.
 
-	"""
-
+		'''
 		data_amp = [np.linalg.norm(x) for x in self.data]
 		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
 		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
@@ -233,5 +226,5 @@ if __name__ == '__main__':
 	converter = SoundConverter(SOUND_DIR,"3_3","Right",False)
 
 	# Sample Usage below
-	# converter.save_sound("interpolate_leftright","exp")
+	converter.save_sound("interpolate_leftright","exp", duration = 3)
 
