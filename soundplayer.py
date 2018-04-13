@@ -55,14 +55,22 @@ class SoundConverter():
 	'''
 
 	def __init__(self, directory, model_name, direction, reverse_time):
+		'''
+			directory    : directory where sound file will be saved
+			model_name   : the name of motionbuilder model
+			direction    : hand direction
+			reverse_time : whether the time series is going to be reversed
+		'''
 
+		# Function to be applied to raw data 
+		self.function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}
 
 		# Add any target models to this dictionary
 		self.models = {'3_3': extract_motionbuilder_model3_3 }
-		
+		# Model function that would be used for loading data
 		self.model = self.models[model_name]
 
-		self.function_dict = {'exp': (np.exp, 0.75), 'log': (np.log,0.5), 'sig': (expit,0.5), '': (lambda x : x, 32.0)}
+		# Direction of hand
 		self.direction = direction
 		self.reverse = reverse_time
 
@@ -71,78 +79,6 @@ class SoundConverter():
 		self.time = data.x
 		self.data = data.y
 		self.directory = directory
-
-
-
-	def save_sound_leftright(self, filename, key, duration=None):
-		positions = self.data
-		moveRight = [dp[0] > 0 for dp in positions for x in range(44100/60)]
-
-
-		data_amp = [np.linalg.norm(x) for x in self.data]
-		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
-		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
-
-		if self.direction.lower() == 'left': 
-			smooth_data = smooth_data[::-1]
-			moveRight = leftright[::-1]
-
-
-		# Interpolation
-		data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
-	
-		if not os.path.exists(self.directory) : os.mkdir(self.directory)
-		
-
-	
-		function, factor = self.function_dict[key]
-		print("function %s with factor %f"%(key,factor))
-
-
-		wav_samplerate = 44100.0
-
-
-		max_x = len(smooth_data)/60 if duration is None else duration
-		print("creating file with %f seconds"%max_x)
-
-		# Scaling the original Range 
-		# ex ) np.exp(min_value*factor)*2.0*np.pi
-
-		myMinVal = function(min(smooth_data)*factor)
-		myMaxVal = function(max(smooth_data)*factor)
-		myRange = myMaxVal-myMinVal
-
-
-		MIN_FREQ = 150.0
-		MAX_FREQ = 1000.0
-
-		step = 1.0/wav_samplerate
-		x_val = 0.0
-		y_cum = 0
-
-		ind = 0
-
-		yvals = []
-		ycums = []
-		yadds = []
-
-		stream = pyaudio.PyAudio().open(format=pyaudio.paFloat32,channels=2,rate=44100,output=True)
-
-		amps = []
-		while x_val<max_x:
-			y_val  = data_fx(x_val)
-			y_add  = function(y_val*factor) #rescaled and transformed
-			y_add  = (y_add-myMinVal)/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
-			y_cum += y_add/wav_samplerate # f(t)*t
-			amp    = np.sin(y_cum*2.0*np.pi)
-			print amp
-			ind   += 1
-			amps.append(amp)
-			x_val += step
-
-		stream.write(np.array(amps).astype(np.float32))
-		wavef.writeframes('')
-		wavef.close()	
 
 
 	def save_sound(self, filename, key, duration=None):
@@ -154,69 +90,85 @@ class SoundConverter():
 			duration : Desired duration. If unspecified, the whole motion sequence will be converted to sound.
 
 		'''
+
+		# Reverse the velocit 
+		if self.direction.lower() == 'left': 
+			self.data = self.data[::-1]
+
+		# Norm of the velocity	
 		data_amp = [np.linalg.norm(x) for x in self.data]
+
+		# Data smoothed with fft convolution
 		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0,mode="same")
 		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0,mode="same")[::-1]
 
-		if self.direction.lower() == 'left': 
-			smooth_data = smooth_data[::-1]
-
-
-		# Interpolation
+		# Create interpolation function at range (0,..., len(data)/60)
+		# len(data)/60 assuming each data point is gathered at 1/60 second interval.
 		data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
 		
-
+		# create a saving directory if directory is not present
 		if not os.path.exists(self.directory) : os.mkdir(self.directory)
 		
-
-	
+		# prepare the function given initial function key
 		function, factor = self.function_dict[key]
 		print("function %s with factor %f"%(key,factor))
 
-
+		# Creating wav file at sample rate of 44100Hz
 		wav_samplerate = 44100.0
 
 		# opening wav file
 		wavef = wave.open(os.path.join(SOUND_DIR,'_'.join([filename,key,self.direction])+'.wav'),'w')
-		wavef.setnchannels(1)
+		wavef.setnchannels(2)
 		wavef.setsampwidth(2) 
 		wavef.setframerate(wav_samplerate)
 
+
+		# Assuming data points are given at 60 points per second
+		# Length of avatar motion should be length of data / 60 
+		# If custom duration is given, use that custom duration
 		max_x = len(smooth_data)/60 if duration is None else duration
-		print("creating file with %f seconds"%max_x)
+		print("creating file with %s with %f seconds"%(filename,max_x))
 
 		# Scaling the original Range 
 		# ex ) np.exp(min_value*factor)*2.0*np.pi
-
 		myMinVal = function(min(smooth_data)*factor)
 		myMaxVal = function(max(smooth_data)*factor)
 		myRange = myMaxVal-myMinVal
 
-
+		# Minimum and maximum frequency desired
 		MIN_FREQ = 150.0
 		MAX_FREQ = 1000.0
 
+
+		# The data is interpolated at every time step for sound sampling.
+		# sound value at every time step will be the interpolated value between data points from
+		# motionbuilder object.
 		step = 1.0/wav_samplerate
 		x_val = 0.0
 		y_cum = 0
 
-		ind = 0
-
+		# For debugging.
 		yvals = []
 		ycums = []
 		yadds = []
 
 		while x_val<max_x:
+			# Get the interpolated data
 			y_val  = data_fx(x_val)
 			yvals.append(y_val)
-			y_add  = function(y_val*factor) #rescaled and transformed
-			y_add  = (y_add-myMinVal)/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
+			# scale from [myMinVal, myMaxVal] to [MIN_FREQ, MAX_FREQ]
+			y_add  = function(y_val*factor)
+			y_add  = (y_add-myMinVal)/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ 
 			yadds.append(y_add)
-			y_cum += y_add/wav_samplerate # f(t)*t
+			# f(t) * t
+			y_cum += y_add/wav_samplerate
 			ycums.append(y_cum)
+			# sin(2*pi*f(t)*t)
 			amp    = np.sin(y_cum*2.0*np.pi)
+			# increase dt
 			x_val += step
-			wavef.writeframesraw(struct.pack('<h',amp*32767))
+			# Use <hh because there are two channels
+			wavef.writeframesraw(struct.pack('<hh',amp*32767,amp*32767))
 
 		wavef.writeframes('')
 		wavef.close()	
@@ -226,5 +178,5 @@ if __name__ == '__main__':
 	converter = SoundConverter(SOUND_DIR,"3_3","Right",False)
 
 	# Sample Usage below
-	converter.save_sound("interpolate_merged","exp")
+	converter.save_sound("interpolate_merged","exp",3)
 
