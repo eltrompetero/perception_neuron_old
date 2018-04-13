@@ -41,7 +41,7 @@ if __name__ == '__main__':
 	sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 	ind = 0
 	data = wavef.readframes(1024)
-	while data != "":
+	while True:
 		# data = pickle.dumps(sound[ind:ind+1024])
 		sock.sendto(str(np.random.choice(datas)),(HOST,PORT))
 		# data = wavef.readframes(1024)

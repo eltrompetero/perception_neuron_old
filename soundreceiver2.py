@@ -136,11 +136,66 @@ def chunks(l, n):
         yield l[i:i + n]
 
 
+
+
+
+def nan_norm(y):
+    """Calculate L2 norm of given vector ignoring nans."""
+    return sqrt( nansum(y**2) )
+
+
+
+def spline(x,y,order=3,fit_derivative=False,dy=None,weights=None,dy_weights=None):
+    """Fit spline. You may need to optimize this by rewriting the minimization routine.
+    
+    Parameters
+    ----------
+    x : ndarray
+        x-values to fit
+    y : ndarray
+        y-values for each x value
+    order : int,3
+        Order of spline.
+    fit_derivative : bool,False
+        If True, fit the first derivative as well. This must be specified in dy.
+    dy : ndarray,None
+        First derivative for each point given in y. There can be nan values where 
+        there is no derivative defined.
+    weights : ndarray,None
+        Weighting function for each y.
+    dy_weights : ndarray,None
+        Optional separate weighting function for the derivatives.
+        
+    Returns
+    -------
+    spline_parameters : ndarray
+        The coefficients for the spline ordered from highest degree to lowest
+        a_n * x^n + a_{n-1} * x^{n-1} + ... + a0. This can be given to numpy's 
+        polyval routine.
+    """
+    if weights is None:
+        weights=ones_like(x)
+    if dy_weights is None:
+        dy_weights=weights
+        
+    if not fit_derivative:
+        return minimize(lambda params:np.linalg.norm( (polyval(params,x)-y)*weights ),
+                        zeros(order+1))['x']
+    else:
+        return minimize(lambda params:np.linalg.norm( (polyval(params,x)-y)*weights )+
+                        nan_norm( (polyval(polyder(params),x)-dy)*dy_weights ),
+                        zeros(order+1))['x']
+
+
+
+
+
+
 if __name__ == '__main__':	
 
 	# duration of sound streaming for each window
 	# if duration = d, each window plays d seconds of sound
-	duration = 3 if len(sys.argv) <3 else int(sys.argv[2])	
+	duration = 1 if len(sys.argv) <2 else int(sys.argv[1])	
 
 	# initial phase offset
 	phaseOffset = 0
@@ -180,37 +235,64 @@ if __name__ == '__main__':
 
 
 	datalength = 60
+
+	# how many seconds per each point?
 	sec_per_point = duration*1.0/datalength
 
 	# initial tail should be 0
 	# tail is the last value of previous window that would be interpolated with the first value of current window
 	tail = 0
 
+	yprev = []
+	ycurr = []
+
 	while True:
 		if data is not None and len(data) >= datalength :
 			print "creating sound at " + str(time.time()-playstamp)
 			itpval = data[:datalength]
-			x = np.linspace(0,len(itpval),len(itpval))
+			x = np.linspace(0,duration,len(itpval))
 			y = itpval
 
 			# interpolate gaps using cubic spline
-			xf = [0,1]
+			# gap consist of single interval of data point (between the last data of previous window and first data of current window)
+			xf = [0,sec_per_point]
 			yf = [tail,data[0]]
 
+			# construct a gap between two segments
 			cs = CubicSpline(xf,yf)
-			xfran = np.linspace(0,1,sec_per_point*44100)
-			yfran = cs(xfran)
+			xfran = np.linspace(0,sec_per_point,sec_per_point*44100+1)
+			yfran = cs(xfran)[:-1]
+		
+			# now interpolate our current data
+			data_fx = itp.interp1d(x,y)		
 
-
-			data_fx = itp.interp1d(x,y)
-			xran = np.linspace(0,len(itpval),(duration-sec_per_point)*44100)
+			# first interval is used for interpolating between two segments	
+			xran = np.linspace(sec_per_point,duration,(duration-sec_per_point)*44100)
 			yran = data_fx(xran)
 
+
+			# combine two interpolated data
 			yran_total = np.append(yfran,yran)
 			ycum = np.cumsum(yran_total)*2.0*np.pi/44100
 
-			snd = (32767*np.cos(ycum+phaseOffset)).astype(np.int16)
-			phaseOffset += ycum[-1]
+			
+			# debugging
+			if snd!=[]:
+				yprev = snd[-500:]
+
+
+			snd = (32767*np.sin(ycum+phaseOffset)).astype(np.int16)
+			phaseOffset  = ycum[-1]
+
+
+			# debugging
+			ycurr= snd[:500]
+
+			if yprev!=[] and ycurr!=[]:
+				plt.plot(np.linspace(0,1,500),yprev,'ro')
+				plt.plot(np.linspace(1,2,500),ycurr,'bo')				
+				plt.plot(np.linspace(0,2,1000),np.append(yprev,ycurr),'g--')
+				plt.show()
 
 			tail = itpval[-1]  # Keep one for next interpolation
 			del data[:datalength]

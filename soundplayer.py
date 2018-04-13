@@ -155,8 +155,8 @@ class SoundConverter():
 
 		'''
 		data_amp = [np.linalg.norm(x) for x in self.data]
-		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
-		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
+		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0,mode="same")
+		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0,mode="same")[::-1]
 
 		if self.direction.lower() == 'left': 
 			smooth_data = smooth_data[::-1]
@@ -178,7 +178,7 @@ class SoundConverter():
 
 		# opening wav file
 		wavef = wave.open(os.path.join(SOUND_DIR,'_'.join([filename,key,self.direction])+'.wav'),'w')
-		wavef.setnchannels(2)
+		wavef.setnchannels(1)
 		wavef.setsampwidth(2) 
 		wavef.setframerate(wav_samplerate)
 
@@ -226,5 +226,5 @@ if __name__ == '__main__':
 	converter = SoundConverter(SOUND_DIR,"3_3","Right",False)
 
 	# Sample Usage below
-	converter.save_sound("interpolate_leftright","exp", duration = 3)
+	converter.save_sound("interpolate_merged","exp")
 

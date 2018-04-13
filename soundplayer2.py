@@ -152,8 +152,8 @@ class SoundPlayer():
 
 	def save_sound(self, filename, key, duration=None):
 		data_amp = [np.linalg.norm(x) for x in self.data]
-		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
-		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
+		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0,mode=same)
+		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0,mode=same)[::-1]
 
 		if self.direction.lower() == 'left': 
 			smooth_data = smooth_data[::-1]

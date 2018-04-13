@@ -1,6 +1,7 @@
 import socket, pyaudio, threading, sys, pickle, pygame, time
 from scipy import interpolate as itp
 from streamingcontroller import *
+import array
 
 
 
@@ -42,29 +43,16 @@ def change_to_sound(duration, value, frequency):
 global timestamp
 timestamp = None
 
+# data buffer where frequency is received
 global data
 data = []
 
-global ipdata
-ipdata = []
 
 sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 sock.bind((HOST, PORT))
 
 
 
-def interpolate():
-	if data is not None and len(data) > 1 :
-		itpval = data[:1]
-		data_fx = itp.interp1d(np.arange(len(itpval)),itpval)
-		xran = np.linspace(0,len(itpval)-1,duration*44100)
-		yran = data_fx(xran)
-		snd = (32767*np.cos(np.cumsum(yran)*2.0*np.pi/44100)).astype(np.int16)
-		# snd = (32767.0*np.cos(np.pi*np.arange(44100*duration)*int(data[0])/44100.0)).astype(np.int16)
-		del data[0]
-		ipdata.append(snd)
-
-	
 
 
 def add_to_data():	
@@ -74,46 +62,97 @@ def add_to_data():
 
 
 
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
 
 if __name__ == '__main__':	
 
-	
+	duration = 3 if len(sys.argv) <3 else int(sys.argv[2])	
+	phaseOffset = 0
+
 	p = pyaudio.PyAudio()
 	wavef = wave.open("interpolate_merged_exp.wav","r")
 	sound = load_sound("interpolate_merged_exp.wav")
 
+	global queue
+	queue = []
+
+	def callback(in_data, frame_count, time_info, status):
+		dd = queue.pop() if len(queue)>0 else ''.join(map(lambda x : struct.pack('<h',x), np.array([0 for i in range(44100*duration)])))
+		return (dd, pyaudio.paContinue)
+
+	
 	
 	stream = p.open(format=8,
 	                channels=1,
 	                rate=44100,
-	                frames_per_buffer=1024,
-	                output=True)
+	                frames_per_buffer=44100*duration, # How many frames are you going to play per buffer?
+	                output=True,
+	                stream_callback=callback)
 
 
-	addThread = threading.Thread(target=add_to_data)
-	addThread.start()
+	# Start collecting data
+	# addThread = threading.Thread(target=add_to_data)
+	# addThread.start()
 
-	duration = 10#0.1
+	
 	playstamp = time.time()
+	stream.start_stream()
 
-	amp_fx = itp.interp1d(np.arange(2), [32767,0])
-	amp_xr = np.linspace(0,1,duration*44100)
-	amp_yr = amp_fx(amp_xr)
-	phaseOffset = 0
+	yprev =[]
+	ycurr = []
+	snd = []
+
+subIndex = left_hand_col_indices(False)
+t0 = datetime.now()
+with ANReader(10.0,subIndex,port=7011,verbose=True,port_buffer_size=1024,recent_buffer_size=(10.0+1)*30) as reader:
+    prevv = []
+
+    def add_to_data2():
+    	while True:
+        v,t,tAsDate = reader.copy_recent()
+        if len(v)>0 and not (len(v)==len(prevv) and np.sum((v-prevv).flatten()**2)==0): # do we have enough data points?
+            avv = fetch_matching_avatar_vel(avatar,np.array(tAsDate),t0)
+
+    addThread = threading.Thread(target=add_to_data)
+	addThread.start()
 
 	while True:
 		if data is not None and len(data) > 2 :
 			print "creating sound at " + str(time.time()-playstamp)
-			itpval = data[:61]
-			print "value : " + str(itpval)
-			data_fx = itp.interp1d(np.arange(len(itpval)),itpval)
-			xran = np.linspace(0,len(itpval)-1,duration*44100)
+			itpval = data[:60]
+			x = np.linspace(0,len(itpval),len(itpval))
+			y = itpval
+
+			data_fx = itp.interp1d(x,y,kind='cubic')
+			xran = np.linspace(0,len(itpval),duration*44100)
 			yran = data_fx(xran)
 			ycum = np.cumsum(yran)*2.0*np.pi/44100
+
+			if snd!=[]:
+				yprev = snd[-500:]
+
+
 			snd = (32767*np.cos(ycum+phaseOffset)).astype(np.int16)
-			phaseOffset = ycum[-1]
-			del data[:60]
-			stream.write(snd)
+			ycurr = snd[:500]
+			phaseOffset += ycum[-2]
+			del data[:59]
+
+			# if yprev!=[] and ycurr!=[]:
+			# 	plt.plot(yprev)
+			# 	plt.plot(range(500,1000),ycurr[:500])
+			# 	plt.show()
+			
+			val = ''.join(map(lambda x : struct.pack('<h',x), snd))
+			
+			queue+=(list(chunks(val,44100*duration*2)))
+
+	stream.stop_stream()
+	addThread._stop_event.set()
+
 
 		
 
