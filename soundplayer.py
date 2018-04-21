@@ -91,7 +91,7 @@ class SoundConverter():
 
 		'''
 
-		# Reverse the velocit 
+		# Reverse the velocity
 		if self.direction.lower() == 'left': 
 			self.data = self.data[::-1]
 

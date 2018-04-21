@@ -105,9 +105,10 @@ timestamp = None
 
 # data buffer where frequency is received
 global data
+# Initial 60 points for padding
 data = [0 for i in range(60)]
 
-# global queue for sound buffer
+# global queue for sound buffer, which contains sound samples
 global queue
 queue = []
 
@@ -195,28 +196,27 @@ def spline(x,y,order=3,fit_derivative=False,dy=None,weights=None,dy_weights=None
 if __name__ == '__main__':	
 
 	# duration of sound streaming for each window
-	# if duration = d, each window plays d seconds of sound
-	duration = 1 if len(sys.argv) <2 else int(sys.argv[1])	
+	# if duration = d, each window plays d seconds of sound	
+	duration = 1 if len(sys.argv) < 2 else int(sys.argv[1])	
 
 	# initial phase offset
 	phaseOffset = 0
-
-
-	# Open up the stream
-	p = pyaudio.PyAudio()
 
 
 	def callback(in_data, frame_count, time_info, status):
 		"""
 	    callback function for streamer
 	    Reads from the data buffer if data buffer is not empty, else produce empty sound.
-
 	    """
-		dd = queue.pop() if len(queue)>0 else ''.join(map(lambda x : struct.pack('<h',x), np.array([0 for i in range(44100*duration)])))
-		return (dd, pyaudio.paContinue)
+
+	    # If queue is not empty, play the first chunk in the queue.
+	    # Queue contains the size 44100 chunk of byte stream converted from interpolated sound data.
+		play_data = queue.pop() if len(queue)>0 else ''.join(map(lambda x : struct.pack('<h',x), np.array([0 for i in range(44100*duration)])))
+		return (play_data, pyaudio.paContinue)
 
 	
-	
+	# Open up the stream
+	p = pyaudio.PyAudio()	
 	stream = p.open(format=8,
 	                channels=1,
 	                rate=44100,
@@ -229,103 +229,73 @@ if __name__ == '__main__':
 	addThread = threading.Thread(target=add_to_data)
 	addThread.start()
 
+	# Start playing
 	playstamp = time.time()
 	stream.start_stream()
 
+	# Sound buffer of Uint16 data points
 	snd = []
 
-
-	datalength = 60
+	# Number of data points that would be included in each window for interpolation
+	sample_per_sec = 60
 
 	# how many seconds per each point?
-	sec_per_point = duration*1.0/datalength
+	sec_per_point = duration*1.0/sample_per_sec
 
 	# initial tail should be 0
 	# tail is the last value of previous window that would be interpolated with the first value of current window
 	tail = 0
 
-	yprev = []
-	ycurr = []
-
 	while True:
-		if data is not None and len(data) >= datalength*2 :
+		if data is not None and len(data) >= sample_per_sec*2 :
 			print "creating sound at " + str(time.time()-playstamp)
-			itpval = data[:datalength*2]
-			x = np.arange(datalength*2)
-			xFinelySpaced=linspace(x[0],x[-1],44100)
-			print "xFinelySpaced : " + str(len(xFinelySpaced))
-			# print data
-			y1 = itpval[:datalength]
-			# print y1
-			y2 = itpval[datalength:]
-			# print y2
 
-			cubicParams = spline(x[:datalength],y1)
+			# Bring two windows w_{i}, w_{i+1}
+			itpval = data[:sample_per_sec*2]			
+
+			# Get x range for interpolation
+			x = np.arange(sample_per_sec*2)
+			xFinelySpaced=linspace(x[0],x[-1],44100)
+
+			# Get data points from two windows
+			y1 = itpval[:sample_per_sec]
+			y2 = itpval[sample_per_sec:]
+
+			# Create spline
+			cubicParams = spline(x[:sample_per_sec],y1)
 			y1FinelySpaced=polyval(cubicParams,xFinelySpaced)
 
-			ix=(xFinelySpaced>=datalength-1)&(xFinelySpaced<=datalength)
+			ix=(xFinelySpaced>=sample_per_sec-1)&(xFinelySpaced<=sample_per_sec)
 
-			xSpan=concatenate((xFinelySpaced[ix],x[datalength:]))
+			xSpan=concatenate((xFinelySpaced[ix],x[sample_per_sec:]))
 			ySpan=concatenate((y1FinelySpaced[ix],y2))
-			dySpan=concatenate((polyval(polyder(cubicParams),xFinelySpaced[ix]),zeros(datalength)+nan))
+			dySpan=concatenate((polyval(polyder(cubicParams),xFinelySpaced[ix]),zeros(sample_per_sec)+nan))
 
-			weightsSpan=concatenate(( ones(ix.sum())*2,ones(datalength) ))*datalength
-			dweightsSpan=concatenate(( ones(ix.sum())*2,ones(datalength) ))
+			weightsSpan=concatenate(( ones(ix.sum())*2,ones(sample_per_sec) ))*sample_per_sec
+			dweightsSpan=concatenate(( ones(ix.sum())*2,ones(sample_per_sec) ))
 
 			splineParams=spline(xSpan,ySpan,4,
 			                    fit_derivative=True,dy=dySpan,weights=weightsSpan)
 
 			y2FinelySpaced=polyval(splineParams,xFinelySpaced)
 
-			# print y2FinelySpaced
 
-			ix=xFinelySpaced<datalength
+			ix=xFinelySpaced < sample_per_sec
 			yCombined=concatenate((y1FinelySpaced[ix],y2FinelySpaced[ix==0]))[:44100]
 
-			
-			# plt.title("window " + str(index) + ", window " + str(index+1))
-
-			# if index%2==0:
-			# 	plt.plot(x[:datalength],y1,'g-')
-			# 	plt.plot(x[datalength:],y2,'b-')
-			# 	plt.plot(xFinelySpaced[:44100],yCombined[:44100],'k-')
-			# 	plt.plot(xFinelySpaced[44100:],yCombined[44100:],'r-')
-			# 	plt.show()
-			# else :
-			# 	plt.plot(x[:datalength],y1,'b-')
-			# 	plt.plot(x[datalength:],y2,'g-')
-			# 	plt.plot(xFinelySpaced[:44100],yCombined[:44100],'r-')
-			# 	plt.plot(xFinelySpaced[44100:],yCombined[44100:],'k-')
-			# 	plt.show()
-
 			ycum = np.cumsum(yCombined)*2.0*np.pi/44100
-
-			
-			# debugging
-			# if snd!=[]:
-			# 	yprev = snd[-500:]
-
-
 			snd = (32767.0*np.sin(ycum))
 
-			# plt.plot(xFinelySpaced[44000:45000],snd[44000:45000],'k-')
-			# plt.show()
-			# if index%2==0:
-			# 	plt.plot(xFinelySpaced[44000:44100],snd[44000:44100],'k-')
-			# 	plt.plot(xFinelySpaced[44100:45000],snd[44100:45000],'r-')
-			# 	plt.show()
-			# else :
-			# 	plt.plot(xFinelySpaced[44000:44100],snd[44000:44100],'r-')
-			# 	plt.plot(xFinelySpaced[44100:45000],snd[44100:45000],'k-')
-			# 	plt.show()
 
+			# write the data points into string
 			val = ''.join(map(lambda x : struct.pack('<h',x), snd))
 			
-			# Length 2 string per each data point when written into byte stream
+			# each data point is converted into length 2 string when written into byte stream
+			# So chunk data points for each seconds, which will be in length (44100 * duration * 2)
 			queue+=(list(chunks(val,44100*duration*2)))
 
-			del data[:datalength]
-			# index += 1
+			# remove the head of data so the next window would be the head for next interpolation
+			del data[:sample_per_sec]
 
 	stream.stop_stream()
 	addThread._stop_event.set()
