@@ -67,87 +67,71 @@ class SoundPlayer():
 
 
 		data_amp = [np.linalg.norm(x) for x in self.data]
-		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0)
-		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0)[::-1]
+		data_x = [v[1] for v in self.data]
+		data_exp = np.exp(np.abs(data_x*10))
+		max_dx = max(np.exp(np.abs(data_x*10)))
+
+		smooth_data = fftconvolve(data_amp,np.ones(12)/12.0,mode="same")
+		smooth_data = fftconvolve(smooth_data[::-1],np.ones(12)/12.0,mode="same")[::-1]
+
+		smooth_data_x = fftconvolve(data_x,np.ones(12)/12.0,mode="same")
+		smooth_data_x = fftconvolve(smooth_data_x[::-1],np.ones(12)/12.0,mode="same")[::-1]
+
 
 		if self.direction.lower() == 'left': 
 			smooth_data = smooth_data[::-1]
 			moveRight = leftright[::-1]
+			smooth_data_x = smooth_data_x[::-1]
 
 
 		# Interpolation
 		data_fx = itp.interp1d(np.arange(len(smooth_data))/60.0,smooth_data)
+		data_fx_x = itp.interp1d(np.arange(len(smooth_data_x))/60.0,smooth_data_x)
 		
 
 		if not os.path.exists(self.directory) : os.mkdir(self.directory)
 		
-
 	
 		function, factor = self.function_dict[key]
 		print("function %s with factor %f"%(key,factor))
 
-
 		wav_samplerate = 44100.0
 
 		# opening wav file
-		# wavef = wave.open(os.path.join(SOUND_DIR,'_'.join([filename,key,self.direction])+'.wav'),'w')
-		# wavef.setnchannels(2)
-		# wavef.setsampwidth(2) 
-		# wavef.setframerate(wav_samplerate)
+		wavef = wave.open(os.path.join(SOUND_DIR,'_'.join([filename,key,self.direction])+'.wav'),'w')
+		wavef.setnchannels(2)
+		wavef.setsampwidth(2) 
+		wavef.setframerate(wav_samplerate)
 
-		max_x = 5#len(smooth_data)/60 if duration is None else duration
-		print("creating file with %f seconds"%max_x)
+		duration = len(smooth_data)/60 if duration is None else duration
+		print("creating file with %f seconds"%duration)
 
 		# Scaling the original Range 
 		# ex ) np.exp(min_value*factor)*2.0*np.pi
-
-		myMinVal = function(min(smooth_data)*factor)
-		myMaxVal = function(max(smooth_data)*factor)
-		myRange = myMaxVal-myMinVal
-
-
 		MIN_FREQ = 150.0
 		MAX_FREQ = 1000.0
 
-		step = 1.0/wav_samplerate
-		x_val = 0.0
-		y_cum = 0
+		t = np.arange(int(wav_samplerate*duration))/wav_samplerate
+		rawVelocity = data_fx(t)
+		xVelocity = data_fx_x(t)
+		freq=function(rawVelocity*factor)
 
-		ind = 0
-
-		yvals = []
-		ycums = []
-		yadds = []
-
-		stream = pyaudio.PyAudio().open(format=pyaudio.paFloat32,channels=2,rate=44100,output=True)
-
-		amps = []
-		while x_val<max_x:
-			y_val  = data_fx(x_val)
-			y_add  = function(y_val*factor) #rescaled and transformed
-			y_add  = (y_add-myMinVal)/myRange*(MAX_FREQ-MIN_FREQ)+MIN_FREQ # scale from one range to another
-			y_cum += y_add/wav_samplerate # f(t)*t
-			amp    = np.sin(y_cum*2.0*np.pi)
-			print amp
-			ind   += 1
-			amps.append(amp)
-			x_val += step
-			# amps.append(amp)
-			# if len(amps)==88200:
-			# 	print "writing"
-				
-			# 	amps=[]
-			# wavef.writeframesraw(struct.pack('<hh',0,amp*32767))
-
-			# if moveRight[ind]:
-			# 	wavef.writeframesraw(struct.pack('<hh',amp*32767/4,amp*32767))
-			# else:
-			# 	wavef.writeframesraw(struct.pack('<hh',amp*32767,amp*32767/4))
+		factor_left = np.exp(-np.sign(xVelocity)*np.abs(xVelocity*10))
+		factor_right = np.exp(np.sign(xVelocity)*np.abs(xVelocity*10))
+		max_xvel = max(max(factor_left),max(factor_right))
 
 
-		stream.write(np.array(amps).astype(np.float32))
-		# wavef.writeframes('')
-		# wavef.close()	
+		freq=(freq-freq.min())/(freq.max()-freq.min())*(MAX_FREQ-MIN_FREQ)+MIN_FREQ
+		phase=np.cumsum(freq)/wav_samplerate
+		amp    = np.sin(phase*2.0*np.pi)
+
+		factor = 10**int(np.log(max_xvel)/np.log(10))/2
+		print factor
+		for i, a in enumerate(amp):
+			fl = min(max(0.1,factor*factor_left[i]/max_xvel),1.0)
+			fr = min(max(0.1,factor*factor_right[i]/max_xvel),1.0)
+			wavef.writeframesraw(struct.pack('<hh',a*fl*32767,a*fr*32767))
+
 
 
 	def save_sound(self, filename, key, duration=None):
