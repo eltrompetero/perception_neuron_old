@@ -5,6 +5,7 @@
 from __future__ import division
 from utils import *
 import time
+from datetime import datetime
 from axis_neuron import left_hand_col_indices,right_hand_col_indices
 from port import *
 import dill
@@ -295,6 +296,11 @@ class HandSyncExperiment(object):
         rotAngle : float
         avatar : Interpolation
         t0 : datetime.datetime
+
+        Returns
+        -------
+        update_broadcaster : function
+            Function for updating the performance broadcast port with latest performance value.
         """
         def update_broadcaster(performance,export=False):
             try:
@@ -410,6 +416,42 @@ class HandSyncExperiment(object):
                 self.rotAngle[0]*180/np.pi)
         print "Rotation angle to center right hand about x-axis is %1.1f degrees."%(
                 self.rotAngle[1]*180/np.pi)
+    
+    @staticmethod
+    def read_cal(fname,min_v):
+        """
+        Read calibration recording from file. 
+                
+        Parameters
+        ----------
+        fname : str
+            Name of file to save as.
+        min_v : float,0.3
+            Subject must be moving at least this fast (m/s) along the xy-plane for the calibration to
+            register.
+        """
+        from numpy.linalg import norm
+
+        # Load the data and find which direction the user is facing. Extract from that, the
+        # rotation angle needed about the z-axis (pointing up out of the ground) to make the person face the
+        # x-axis.
+        df = load_AN_port(fname,time_as_dt=False)
+
+        # Get xy vector.
+        vright = df.iloc[:,right_hand_col_indices()].values[:,:2]
+        vleft = df.iloc[:,left_hand_col_indices()].values[:,:2]
+        vright[:,1] *= -1
+        vleft[:,1] *= -1
+        sright = np.linalg.norm(vright,axis=1)
+        sleft = np.linalg.norm(vleft,axis=1)
+        
+        # Extract 80 percentile of speed for analysis (as long as it is at least min_v).
+        ix = (sright>=np.percentile(sright,80)) & (sright>min_v)
+        angleRight = extract_rot_angle(vright[ix])
+        ix = (sleft>=np.percentile(sleft,80)) & (sleft>min_v)
+        angleLeft = extract_rot_angle(vleft[ix])
+
+        return [-angleLeft,-angleRight]
 
     def run_lf(self,trial_duration):
         """
@@ -488,13 +530,13 @@ class HandSyncExperiment(object):
         """
         from data_access import subject_settings_v3
         from data_access import VRTrial3_1 as VRTrial
-        from coherence import GPR,DTWPerformance
+        from coherence import GPREllipsoid,DTWPerformance
         self.wait_for_start()
         
         # Setup routines for calculating coherence.
-        gprmodel = GPR(mean_performance=gpr_mean_prior,
-                       tmin=min_window_duration,tmax=max_window_duration,
-                       fmin=min_vis_fraction,fmax=max_vis_fraction)
+        gprmodel = GPREllipsoid(mean_performance=gpr_mean_prior,
+                                tmin=min_window_duration,tmax=max_window_duration,
+                                fmin=min_vis_fraction,fmax=max_vis_fraction)
         realTimePerfEval = DTWPerformance()
         gprPerfEval = DTWPerformance()
 
@@ -540,59 +582,68 @@ class HandSyncExperiment(object):
         # This relies on reader to fetch data which is declared later.
         self.updateBroadcastEvent = threading.Event()
 
-        # Define function that will be run in GPR thread. 
-        def run_gpr_update(reader,gprmodel):
+        # Define function for GPR updating. One thread updates the settings. The other updates GPR.
+        def update_settings(reader,gprmodel):
             """
-            Run GPR updater when run_gpr appears. Read in current window setting from this_setting and write
-            out next window setting to next_setting.
+            1) GPR is updated.
+            2) Next trial setting is set.
+            3) GPR is optimized. This can take a long time so the safest thing to do is to run it
+                during a trial.
+            4) gprmodel and other data is saved into gpr.p.
             """
             while not self.endEvent.is_set():
+                # This is only triggered during pauses in order to prevent unnecessary CPU overhead, but I
+                # don't think is necessary.
                 pauseEvent.wait()
-
-                # Run GPR for the next windows setting.
+                
+                # Update next trial settings and refresh reader history.
                 if os.path.isfile('%s/%s'%(DATADR,'run_gpr')):
-                    print "Running GPR on this trial..."
-                    v,t,tdateHistory = reader.copy_history()
+                    print "successfully read run_gpr"
+                    # Fetch user movement during trial.
+                    v,t,tdateHistory=reader.copy_history()
                     # Put output from Axis Neuron into comparable coordinate system accounting for reflection
                     # symmetry.
-                    v[:,1:] *= -1
-                    v[:,:2] = rotate_xy(v[:,:2],rotAngle)
-
-                    tdateHistory,_ = remove_pause_intervals(tdateHistory.tolist(),
-                                                            zip(self.pause,self.unpause))
-                    avv = fetch_matching_avatar_vel(avatar,np.array(tdateHistory),t0)
-
+                    v[:,1:]*=-1
+                    v[:,:2]=rotate_xy(v[:,:2],rotAngle)
+                    tdateHistory,_=remove_pause_intervals( tdateHistory.tolist(),
+                                                           zip(self.pause,self.unpause) )
+                    avv=fetch_matching_avatar_vel(avatar,np.array(tdateHistory),t0)
+                    
+                    # Update GPR with this trial's data.
                     # Try to open and read. Sometimes there is a delay in accessibility because
                     # the file is being written.
-                    thisDuration,thisFraction = self.read_this_setting()
-                    
+                    thisDuration,thisFraction=self.read_this_setting()
                     # Get subject performance ignoring the first few seconds of performance.
-                    perf = gprPerfEval.time_average( avv[75:,1:],v[75:,1:],dt=1/30 )
-                    
+                    perf=gprPerfEval.time_average( avv[:,1:],v[:,1:],dt=1/30,bds=[2,np.inf] )
                     # Update GPR. For initial full visibility trial, update values for all values of fraction.
                     if thisDuration==0:
                         gprmodel.update( ilogistic(perf),0.,1. )
-                        nextDuration,nextFraction = gprmodel.max_uncertainty()
                     else:
                         gprmodel.update( ilogistic(perf),thisDuration,thisFraction )
-                        nextDuration,nextFraction = gprmodel.max_uncertainty()
+
+                    # Get next trial settings and output them to a file that is read by UE4 before the start
+                    # of the next trial.
+                    # NOTE: There is no guarantee that this file is read before the next trial starts.
+                    nextDuration,nextFraction=gprmodel.max_uncertainty()
                     if verbose:
                         #print call("ls --time-style='+%d-%m-%Y %H:%M:%S' -l this_setting",shell=True)
                         print "thisDuration: %1.1f\tthisFraction: %1.1f"%(thisDuration,thisFraction)
                         print "nextDuration: %1.1f\tnextFraction: %1.1f"%(nextDuration,nextFraction)
-                    open('%s/next_setting'%DATADR,'w').write('%1.1f,%1.1f'%(nextDuration,
-                                                                            nextFraction))
+                    open('%s/next_setting'%DATADR,'w').write('%1.1f,%1.1f'%(nextDuration,nextFraction))
                     
-                    # Delete signal file.
-                    self.delete_file('run_gpr')
-
                     # Refresh history.
                     self.broadcast.update_payload('-1.0')
+                    if verbose:print "Refreshing reader history (update_settings)."
                     reader.refresh()
-                    while reader.len_history()<(self.duration*30):
-                        if verbose:
-                            print "Waiting to collect more data...(%d)"%reader.len_history()
-                        time.sleep(.5)
+                    
+                    # Optimize hyperparameters of GPR given the latest trial data.
+                    # NOTE: This has to finish running before the trial ends. Right now, there is no guarantee
+                    # that it will.
+                    if verbose:print "Running GPR on this trial..."
+                    gprmodel.optimize_hyperparams(verbose=verbose,n_restarts=1)
+                    
+                    # Cleanup.
+                    self.delete_file('run_gpr')
                     dill.dump({'gprmodel':gprmodel,'performance':performance,
                                'pause':self.pause,'unpause':self.unpause,
                                'trialStartTimes':self.trialStartTimes,
@@ -601,12 +652,10 @@ class HandSyncExperiment(object):
 
                 time.sleep(.05)
 
-
         # Wait til start_time has been written to start experiment.
         t0 = self.wait_for_start_time()
 
-        if verbose:
-            print "Starting threads."
+        if verbose:print "Starting threads."
         recordThread.start()
         with ANReader(self.duration,self.subPartsIx,
                       port=7011,
@@ -616,26 +665,25 @@ class HandSyncExperiment(object):
             
             updateBroadcastThread = threading.Thread(
                     target=self.define_update_broadcaster(reader,self.updateBroadcastEvent,pauseEvent,
-                                                      windowsInIndexUnits,realTimePerfEval,self.broadcast,
-                                                      rotAngle,avatar,t0),
+                                                          windowsInIndexUnits,realTimePerfEval,self.broadcast,
+                                                          rotAngle,avatar,t0),
                     args=(performance,export_realtime_velocities,) )
 
             while reader.len_history()<windowsInIndexUnits:
-                if verbose:
-                    print "Waiting to collect more data...(%d)"%reader.len_history()
+                if verbose:print "Waiting to collect more data...(%d)"%reader.len_history()
                 self.broadcast.update_payload('-1.0')
-                time.sleep(1)
+                time.sleep(.25)
             updateBroadcastThread.start()
            
             # Start GPR thread.
-            gprThread = threading.Thread(target=run_gpr_update,args=(reader,gprmodel))
-            gprThread.start()
+            settingsThread=threading.Thread(target=update_settings,args=(reader,gprmodel))
+            settingsThread.start()
 
             while not os.path.isfile('%s/%s'%(DATADR,'end')):
                 # If UE4 has been paused
                 if os.path.isfile('%s/%s'%(DATADR,'pause_time')):
                     pauseEvent.clear()
-                    if verbose: print "Paused."
+                    if verbose:print "Paused."
                     self.read_pause()
                     self.delete_file('pause_time')
                     while not os.path.isfile('%s/%s'%(DATADR,'unpause_time')):
@@ -650,25 +698,22 @@ class HandSyncExperiment(object):
                                 self.unpause.append( datetime.strptime(f.readline(),'%Y-%m-%dT%H:%M:%S.%f') )
                             success = True
                             pauseEvent.set()
-                            if verbose: print "Unpaused."
+                            if verbose:print "Unpaused."
                         except IOError:
                             pass
                     self.delete_file('unpause_time')
                     
+                    if verbose:print "Refreshing reader history (pause)."
                     reader.refresh()
-                    while reader.len_history()<(self.duration*30):
-                        if verbose:
-                            print "Waiting to collect more data...(%d)"%reader.len_history()
-                        time.sleep(.5)
                 
                 time.sleep(.1)
-            
-        print "Ending threads..."
+         
+        if verbose:print "Ending threads..."
         self.stop()
         updateBroadcastThread.join()
         broadcastThread.join()
         recordThread.join()
-        gprThread.join()
+        settingsThread.join()
 
         with open('%s/%s'%(DATADR,'end_port_read'),'w') as f:
             f.write('')
@@ -676,14 +721,17 @@ class HandSyncExperiment(object):
         # Read in last trial setting.
         self.read_this_setting() 
         
-        print "Saving GPR."
+        if verbose:print "Saving GPR."
         dill.dump({'gprmodel':gprmodel,'performance':performance,
                    'pause':self.pause,'unpause':self.unpause,
                    'trialStartTimes':self.trialStartTimes,
                    'trialEndTimes':self.trialEndTimes,
                    'rotAngle':rotAngle},
                   open('%s/%s'%(DATADR,'gpr.p'),'wb'),-1)
-        
+
+        # Give time for UE4 to finish saving files.
+        time.sleep(10)
+
         # Move all files into the left or right directory given by which hand the subject was using.
         if not os.path.isdir(handedness):
             os.mkdir(handedness)
@@ -784,8 +832,6 @@ def remove_pause_intervals(t,pause_intervals,return_removed_ix=False):
     if return_removed_ix:
         return t,np.concatenate([[0],np.cumsum([i.total_seconds() for i in np.diff(t)])]),removedIx
     return t,np.concatenate([[0],np.cumsum([i.total_seconds() for i in np.diff(t)])])
-
-
 
 def extract_rot_angle(v,noise_threshold=.4,min_points=10):
     """
