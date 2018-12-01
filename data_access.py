@@ -200,7 +200,7 @@ def subject_settings_v3_3(index,hand,return_list=True):
                 ][index]
     dr = '../data/UE4_Experiments/%s/%s'%(settings['person'],hand)
     try:
-        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'))['rotAngle']
+        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'),encoding='latin1')['rotAngle']
     except IOError:
         rotAngle=np.nan
     reverse=settings['reverse'][0] if hand=='left' else settings['reverse'][1]
@@ -282,7 +282,7 @@ def subject_settings_v3_4(index,hand,return_list=True):
                 ][index]
     dr = '../data/UE4_Experiments/%s/%s'%(settings['person'],hand)
     try:
-        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'))['rotAngle']
+        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'),encoding='latin1')['rotAngle']
     except IOError:
         rotAngle=np.nan
     reverse=settings['reverse'][0] if hand=='left' else settings['reverse'][1]
@@ -368,7 +368,7 @@ def subject_settings_v3_5(index,hand,return_list=True):
                 ][index]
     dr = '../data/UE4_Experiments/%s/%s'%(settings['person'],hand)
     try:
-        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'))['rotAngle']
+        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'),encoding='latin1')['rotAngle']
         # In the case where the final save in HandSyncExperiment.run_vr did not complete, the
         # rotAngle will be a list.
         if type(rotAngle) is list:
@@ -447,7 +447,7 @@ def subject_settings_v3_6(index,hand,return_list=True):
                 ][index]
     dr = '../data/UE4_Experiments/%s/%s'%(settings['person'],hand)
     try:
-        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'))['rotAngle']
+        rotAngle = pickle.load(open('%s/%s'%(dr,'gpr.p'),'rb'),encoding='latin1')['rotAngle']
     except IOError:
         rotAngle=np.nan
     reverse=settings['reverse'][0] if hand=='left' else settings['reverse'][1]
@@ -506,7 +506,7 @@ class VRTrial3_1(object):
         self.reverse = reverse
 
         # Load gpr data points.
-        savedData = pickle.load(open('%s/%s'%(self.dr,'gpr.p'),'rb'))
+        savedData = pickle.load(open('%s/%s'%(self.dr,'gpr.p'),'rb'),encoding='latin1')
         self.gprmodel = savedData['gprmodel']
         self.pause=savedData['pause'],savedData['unpause']
         self.trialTypes = ['avatar']

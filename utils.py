@@ -92,6 +92,33 @@ class MultiUnivariateSpline(object):
 # ===================== #
 # Function definitions. #
 # ===================== #
+def rotate(v,n,theta):
+    """
+    Rotate vector about given vector using quaternions represented as matrix multiplication.
+
+    Params:
+    -------
+    v (ndarray)
+        (nSpins,3), xyz format
+    n (vector)
+        Rotation axis.
+    theta (float)
+        Rotation angle.
+    """
+    n /= np.linalg.norm(n)
+    if v.ndim==1:
+        v = v[None,:]
+    nSpins = v.shape[0]
+    
+    # Calculate rotation for theta. Phi for this data point should be undefined.
+    q = np.concatenate([[np.cos(theta/2)],[np.sin(theta/2)*n_ for n_ in n]])
+    R = np.array([[1-2*q[2]**2-2*q[3]**2,2*(q[1]*q[2]-q[3]*q[0]),2*(q[1]*q[3]+q[2]*q[0])],
+                  [2*(q[1]*q[2]+q[3]*q[0]),1-2*q[1]**2-2*q[3]**2,2*(q[2]*q[3]-q[1]*q[0])],
+                  [2*(q[1]*q[3]-q[2]*q[0]),2*(q[2]*q[3]+q[1]*q[0]),1-2*q[1]**2-2*q[2]**2]])
+    
+    rotatedv = R.dot(v.T)
+    return rotatedv.T
+
 def compare_specs(x,y,precision):
     """Given either one spec and a list or two lists, compare the twople values with each other to a
     precision that is a multiple of precision.

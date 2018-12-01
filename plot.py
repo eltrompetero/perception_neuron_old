@@ -2,8 +2,6 @@
 # 
 # Edward Lee edl56@cornell.edu
 # 2017-03-10
-
-
 try:
     import matplotlib.pyplot as plt
 except ImportError:
@@ -13,13 +11,12 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from numpy import sin,cos,pi
 import pandas as pd
-from ising.heisenberg import rotate
 from scipy.interpolate import LSQUnivariateSpline,UnivariateSpline
 import entropy.entropy as info
 from scipy.signal import fftconvolve
 from misc.utils import unique_rows
+from .utils import rotate
 from . import data_access,utils
-
 
 
 # ------------------- #
